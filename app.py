@@ -124,13 +124,12 @@ def parse_pdf_content(pdf_stream):
 
 # ================= 3. ส่วนการแสดงผล (Sidebar UI) =================
 
-st.title("📑 PDF Statement to Excel")
-st.info("อัปโหลดไฟล์ที่แถบด้านข้าง เพื่อเริ่มต้นการแปลงข้อมูล")
+st.title("📑 PDF Multi-Statement to Excel")
+st.info("อัปโหลดไฟล์ PDF (สูงสุด 5 ไฟล์) ที่แถบด้านข้าง")
 
 with st.sidebar:
     st.header("STM to Excel")
     
-    # 1. เพิ่มตัวเลือกธนาคาร
     bank_option = st.selectbox(
         "เลือกรูปแบบธนาคาร",
         ("กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงเทพ (BBL)", "อื่น ๆ")
@@ -138,70 +137,91 @@ with st.sidebar:
     
     st.divider()
 
-    # 2. เลือกไฟล์ PDF (ตามรูปแบบในรูปภาพ)
-    st.write("**เลือกไฟล์ PDF**")
-    pdf_file = st.file_uploader("Upload", type="pdf", label_visibility="collapsed")
-    st.caption("200MB per file • PDF")
+    st.write("**เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)**")
+    # ปรับตรงนี้ให้รับได้หลายไฟล์
+    pdf_files = st.file_uploader("Upload", type="pdf", accept_multiple_files=True, label_visibility="collapsed")
+    st.caption("Max 5 files • 200MB per file")
 
-    # 3. รหัสผ่านไฟล์ PDF (ตามรูปแบบในรูปภาพ)
     st.write("**รหัสผ่านไฟล์ PDF (ถ้ามี)**")
+    # หมายเหตุ: จะใช้รหัสผ่านนี้กับทุกไฟล์ที่อัปโหลด
     password = st.text_input("Password", type="password", label_visibility="collapsed")
 
-    # 4. ปุ่มเริ่มการแปลงไฟล์
     st.write("")
     convert_button = st.button("เริ่มการแปลงไฟล์")
 
 # --- Logic การทำงานเมื่อกดปุ่ม ---
 if convert_button:
-    if pdf_file:
-        try:
-            with st.spinner("กำลังประมวลผล..."):
-                # 1. ปลดล็อก PDF
-                pdf_bytes = pdf_file.read()
-                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                    unlocked_io = io.BytesIO()
-                    pdf.save(unlocked_io)
-                    unlocked_io.seek(0)
+    if pdf_files:
+        if len(pdf_files) > 5:
+            st.sidebar.error("❌ กรุณาอัปโหลดไม่เกิน 5 ไฟล์")
+        else:
+            try:
+                all_dfs = []
+                progress_bar = st.progress(0)
+                
+                for index, pdf_file in enumerate(pdf_files):
+                    st.write(f"⏳ กำลังประมวลผลไฟล์: `{pdf_file.name}`...")
                     
-                    # 2. อ่านข้อมูล
-                    data_rows = parse_pdf_content(unlocked_io)
-                    header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
-                    df = pd.DataFrame(data_rows, columns=header)
-                    
-                    # 3. จัดรูปแบบข้อมูล
-                    df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
-
-                    # 4. สร้าง Excel
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
-                        df.to_excel(writer, index=False, sheet_name='Statement')
-                        workbook, worksheet = writer.book, writer.sheets['Statement']
+                    # 1. ปลดล็อก PDF
+                    pdf_bytes = pdf_file.read()
+                    with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                        unlocked_io = io.BytesIO()
+                        pdf.save(unlocked_io)
+                        unlocked_io.seek(0)
                         
-                        date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
-                        num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
+                        # 2. อ่านข้อมูล
+                        data_rows = parse_pdf_content(unlocked_io)
+                        header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                        temp_df = pd.DataFrame(data_rows, columns=header)
+                        
+                        # เพิ่มคอลัมน์ชื่อไฟล์เพื่อให้รู้ว่ามาจากไฟล์ไหน (Optional)
+                        temp_df['Source File'] = pdf_file.name
+                        all_dfs.append(temp_df)
+                    
+                    # อัปเดต Progress bar
+                    progress_bar.progress((index + 1) / len(pdf_files))
 
-                        worksheet.set_column('A:A', 12, date_fmt)
-                        worksheet.set_column('D:E', 18, num_fmt)
-                        worksheet.set_column('B:B', 10)
-                        worksheet.set_column('C:C', 25)
-                        worksheet.set_column('F:G', 45)
-                    
-                    output.seek(0)
-                    
-                    # 5. แสดงผลในหน้าจอหลัก
-                    st.success(f"✅ แปลงไฟล์สำเร็จ ({bank_option})")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    st.download_button(
-                        label="📥 ดาวน์โหลดไฟล์ Excel",
-                        data=output,
-                        file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                # 3. รวมข้อมูลทุกไฟล์
+                final_df = pd.concat(all_dfs, ignore_index=True)
+                
+                # 4. จัดรูปแบบข้อมูล
+                final_df['วันที่'] = pd.to_datetime(final_df['วันที่'], format='%d-%m-%y', errors='coerce')
+                # เรียงลำดับตามวันที่และเวลา (Optional)
+                final_df = final_df.sort_values(by=['วันที่', 'เวลา']).reset_index(drop=True)
 
-        except PasswordError:
-            st.sidebar.error("❌ รหัสผ่านไม่ถูกต้อง")
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+                # 5. สร้าง Excel
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
+                    final_df.to_excel(writer, index=False, sheet_name='Combined_Statement')
+                    workbook, worksheet = writer.book, writer.sheets['Combined_Statement']
+                    
+                    date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
+
+                    worksheet.set_column('A:A', 12, date_fmt)
+                    worksheet.set_column('D:E', 18, num_fmt)
+                    worksheet.set_column('B:B', 10)
+                    worksheet.set_column('C:C', 25)
+                    worksheet.set_column('F:G', 35)
+                    worksheet.set_column('H:H', 20) # คอลัมน์ Source File
+                
+                output.seek(0)
+                
+                # 6. แสดงผล
+                st.success(f"✅ แปลงไฟล์สำเร็จ รวมทั้งหมด {len(pdf_files)} ไฟล์ ({bank_option})")
+                st.dataframe(final_df, use_container_width=True)
+                
+                st.download_button(
+                    label="📥 ดาวน์โหลดไฟล์ Excel (รวมทุกไฟล์)",
+                    data=output,
+                    file_name="combined_statements.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            except PasswordError:
+                st.sidebar.error("❌ รหัสผ่านไม่ถูกต้อง (รหัสผ่านต้องเหมือนกันทุกไฟล์)")
+            except Exception as e:
+                st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
     else:
-        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF")
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์")
