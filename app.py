@@ -7,9 +7,18 @@ import streamlit as st
 from pikepdf import PasswordError
 
 # ตั้งค่าหน้าเว็บ Streamlit
-st.set_page_config(page_title="PDF Statement Converter (Multi-file)", layout="wide")
+st.set_page_config(page_title="PDF Statement Converter (KBank & KTB)", layout="wide")
 
-# ================= 1. ฟังก์ชันช่วยเหลือ (คงเดิม) =================
+# ================= 1. ฟังก์ชันช่วยเหลือทั่วไป =================
+def str_to_float(val_str):
+    if val_str in [None, "", "-", " "]: return None
+    try: 
+        # ลบ comma และช่องว่างออก
+        clean_val = str(val_str).replace(',', '').strip()
+        return float(clean_val)
+    except: 
+        return None
+
 def split_channel_and_detail(text):
     channels = [
         "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
@@ -25,13 +34,8 @@ def split_channel_and_detail(text):
             break
     return found_channel, detail_part
 
-def str_to_float(val_str):
-    if val_str in [None, "", "-", " "]: return None
-    try: return float(str(val_str).replace(',', ''))
-    except: return None
-
-# ================= 2. Logic การอ่าน PDF (คงเดิม) =================
-def parse_pdf_content(pdf_stream):
+# ================= 2. Logic สำหรับกสิกรไทย (KBank - โค้ดเดิม) =================
+def parse_kbank_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
@@ -46,17 +50,14 @@ def parse_pdf_content(pdf_stream):
             for line in lines:
                 line = line.strip()
                 if not line: continue
-                
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-                
                 if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
-                
                 if date_match:
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
@@ -65,7 +66,6 @@ def parse_pdf_content(pdf_stream):
                     
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
-                    
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
                     
                     amount_val, balance = None, None
@@ -90,7 +90,7 @@ def parse_pdf_content(pdf_stream):
                     c_extra, d_extra = split_channel_and_detail(line)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    # --- กรองข้อมูลตามเงื่อนไข ---
+    # กรองเอาเฉพาะรายการที่สมบูรณ์ (เหมือน Logic เดิม)
     temp_list_bf = []
     found_first_bf = False
     for row in all_parsed_rows:
@@ -119,21 +119,55 @@ def parse_pdf_content(pdf_stream):
                 i += 1
             if len(empty_block) == 1:
                 final_filtered_rows.append(empty_block[0])
-            
     return final_filtered_rows
 
-# ================= 3. ส่วนการแสดงผล (ปรับปรุงเพื่อรองรับหลายไฟล์) =================
+# ================= 3. Logic สำหรับกรุงไทย (KTB - โค้ดเพิ่มเติม) =================
+def parse_ktb_content(pdf_stream):
+    all_parsed_rows = []
+    with pdfplumber.open(pdf_stream) as pdf:
+        for page in pdf.pages:
+            # ใช้ extract_table เนื่องจาก Layout กรุงไทยเป็นตารางชัดเจน
+            table = page.extract_table({
+                "vertical_strategy": "lines",
+                "horizontal_strategy": "lines",
+            })
+            
+            if not table: continue
+            
+            for row in table:
+                # ตรวจสอบว่าเป็นแถวรายการ (คอลัมน์แรกมีวันที่รูปแบบ DD/MM/YY)
+                if row[0] and re.search(r'\d{2}/\d{2}/\d{2}', row[0]):
+                    # แยกวันที่และเวลา (KTB มักขึ้นบรรทัดใหม่ใน Cell เดียวกัน)
+                    dt_parts = row[0].split('\n')
+                    date = dt_parts[0].strip()
+                    time = dt_parts[1].strip() if len(dt_parts) > 1 else ""
+                    
+                    desc = row[1].replace('\n', ' ').strip() if row[1] else ""
+                    detail = row[2].replace('\n', ' ').strip() if row[2] else ""
+                    
+                    withdraw = str_to_float(row[3])
+                    deposit = str_to_float(row[4])
+                    balance = str_to_float(row[5])
+                    branch = row[6].strip() if row[6] else ""
+                    
+                    # รวมยอดถอน/ฝากเป็นคอลัมน์เดียวเหมือน KBank
+                    # ถอนเป็นลบ ฝากเป็นบวก
+                    amount_val = deposit if deposit else (-withdraw if withdraw else 0)
+                    
+                    all_parsed_rows.append([date, time, desc, amount_val, balance, f"Branch: {branch}", detail])
+                    
+    return all_parsed_rows
 
-st.title("📑 PDF Statement to Excel")
-st.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
+# ================= 4. ส่วน UI และการประมวลผลหลัก =================
+
+st.title("📑 Bank Statement to Excel Converter")
 
 with st.sidebar:
     st.header("ตั้งค่าการแปลงไฟล์")
-    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)"])
+    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)", "กรุงไทย (KTB)"])
     st.divider()
-    # ปรับให้อัพโหลดได้หลายไฟล์
     pdf_files = st.file_uploader("เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)", type="pdf", accept_multiple_files=True)
-    password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี - ใช้รหัสเดียวกันทุกไฟล์)", type="password")
+    password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
     convert_button = st.button("เริ่มการแปลงไฟล์ทั้งหมด")
 
 if convert_button:
@@ -142,55 +176,54 @@ if convert_button:
             st.error("❌ กรุณาเลือกไฟล์ไม่เกิน 5 ไฟล์")
         else:
             all_dataframes = []
-            status_container = st.container()
-            
             try:
                 progress_bar = st.progress(0)
                 for index, uploaded_file in enumerate(pdf_files):
-                    status_container.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
-                    
+                    st.write(f"⏳ กำลังอ่านไฟล์: {uploaded_file.name}")
                     pdf_bytes = uploaded_file.read()
+                    
                     with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                         unlocked_io = io.BytesIO()
                         pdf.save(unlocked_io)
                         unlocked_io.seek(0)
                         
-                        data_rows = parse_pdf_content(unlocked_io)
-                        header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                        # เลือกฟังก์ชันตามธนาคารที่เลือก
+                        if bank_option == "กสิกรไทย (KBank)":
+                            data_rows = parse_kbank_content(unlocked_io)
+                            date_format = '%d-%m-%y'
+                        else:
+                            data_rows = parse_ktb_content(unlocked_io)
+                            date_format = '%d/%m/%y'
                         
+                        header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง/สาขา", "รายละเอียด"]
                         df_single = pd.DataFrame(data_rows, columns=header)
-                        # แปลงวันที่เพื่อให้เรียงลำดับได้ หรือรักษา Format
-                        df_single['วันที่'] = pd.to_datetime(df_single['วันที่'], format='%d-%m-%y', errors='coerce')
+                        
+                        # พยายามแปลงวันที่ให้เป็น datetime เพื่อการจัดรูปแบบใน Excel
+                        df_single['วันที่'] = pd.to_datetime(df_single['วันที่'], format=date_format, errors='coerce').dt.date
                         
                         all_dataframes.append(df_single)
                     
                     progress_bar.progress((index + 1) / len(pdf_files))
 
                 if all_dataframes:
-                    # รวม DataFrame ทั้งหมดเข้าด้วยกัน
                     final_df = pd.concat(all_dataframes, ignore_index=True)
                     
-                    # (ทางเลือก) เรียงลำดับตามวันที่ถ้าต้องการ
-                    # final_df = final_df.sort_values(by=['วันที่', 'เวลา']).reset_index(drop=True)
-
+                    # สร้างไฟล์ Excel
                     output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                         final_df.to_excel(writer, index=False, sheet_name='Combined_Statement')
                         workbook = writer.book
                         worksheet = writer.sheets['Combined_Statement']
                         
-                        num_fmt = workbook.add_format({
-                            'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
-                            'align': 'right'
-                        })
-                        date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
-
-                        worksheet.set_column('A:A', 15, date_fmt)
-                        worksheet.set_column('B:B', 10)
-                        worksheet.set_column('C:C', 20)
-                        worksheet.set_column('D:E', 20, num_fmt)
-                        worksheet.set_column('F:F', 20)
-                        worksheet.set_column('G:G', 50)
+                        # Format ตัวเลขและวันที่
+                        num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                        
+                        worksheet.set_column('A:A', 12) # วันที่
+                        worksheet.set_column('B:B', 10) # เวลา
+                        worksheet.set_column('C:C', 20) # รายการ
+                        worksheet.set_column('D:E', 18, num_fmt) # จำนวนเงิน/ยอดคงเหลือ
+                        worksheet.set_column('F:F', 20) # ช่องทาง
+                        worksheet.set_column('G:G', 50) # รายละเอียด
                     
                     output.seek(0)
                     st.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
@@ -198,11 +231,11 @@ if convert_button:
                     st.download_button(
                         label="📥 ดาวน์โหลดไฟล์ Excel รวม", 
                         data=output, 
-                        file_name="Combined_Statement.xlsx",
+                        file_name=f"Combined_Statement_{bank_option.split(' ')[0]}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
             except PasswordError:
-                st.error("❌ รหัสผ่านไม่ถูกต้อง หรือไฟล์บางไฟล์ต้องการรหัสผ่านที่ต่างกัน")
+                st.error("❌ รหัสผ่านไม่ถูกต้อง")
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
     else:
