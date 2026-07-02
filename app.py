@@ -9,23 +9,7 @@ from pikepdf import PasswordError
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
-# CSS สำหรับตกแต่งเพิ่มเติม (ถ้าต้องการปรับแต่ง UI ให้ดูเนียนขึ้น)
-st.markdown("""
-    <style>
-    .stButton>button {
-        width: 100%;
-        border-radius: 5px;
-        height: 3em;
-        background-color: #343a40;
-        color: white;
-    }
-    .main {
-        background-color: #1e1e26;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# ================= 1. ฟังก์ชันช่วยเหลือ (Utility) =================
+# ================= 1. ฟังก์ชันช่วยเหลือ (คงเดิม) =================
 def split_channel_and_detail(text):
     channels = [
         "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
@@ -46,7 +30,7 @@ def str_to_float(val_str):
     try: return float(str(val_str).replace(',', ''))
     except: return None
 
-# ================= 2. Logic การอ่าน PDF =================
+# ================= 2. Logic การอ่าน PDF (คงเดิม) =================
 def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -138,88 +122,86 @@ def parse_pdf_content(pdf_stream):
     flush_buffer(empty_row_buffer, final_rows)
     return final_rows
 
-# ================= 3. ส่วนการแสดงผล (Streamlit UI) =================
+# ================= 3. ส่วนการแสดงผล (Sidebar UI) =================
 
-# ใช้ columns เพื่อจัดหน้าจอให้อยู่กึ่งกลาง
-main_col1, main_col2, main_col3 = st.columns([1, 2, 1])
+st.title("📑 PDF Statement to Excel")
+st.info("อัปโหลดไฟล์ที่แถบด้านข้าง เพื่อเริ่มต้นการแปลงข้อมูล")
 
-with main_col2:
-    st.title("📑 PDF to Excel Converter")
-    st.write("แปลงไฟล์ Statement ธนาคารให้เป็น Excel ได้ง่ายๆ")
-    st.divider()
-
-    # --- เพิ่มตัวเลือกธนาคาร ---
+with st.sidebar:
+    st.header("ตั้งค่าการแปลงไฟล์")
+    
+    # 1. เพิ่มตัวเลือกธนาคาร
     bank_option = st.selectbox(
         "เลือกรูปแบบธนาคาร",
-        ("กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงเทพ (BBL)", "กรุงไทย (KTB)", "อื่น ๆ")
+        ("กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงเทพ (BBL)", "อื่น ๆ")
     )
+    
+    st.divider()
 
-    # --- ส่วนอัปโหลดไฟล์ ---
+    # 2. เลือกไฟล์ PDF (ตามรูปแบบในรูปภาพ)
     st.write("**เลือกไฟล์ PDF**")
-    pdf_file = st.file_uploader("ลากไฟล์มาวางที่นี่", type="pdf", label_visibility="collapsed")
-    st.caption("จำกัดขนาด 200MB ต่อไฟล์ • PDF เท่านั้น")
+    pdf_file = st.file_uploader("Upload", type="pdf", label_visibility="collapsed")
+    st.caption("200MB per file • PDF")
 
-    # --- ส่วนรหัสผ่าน ---
+    # 3. รหัสผ่านไฟล์ PDF (ตามรูปแบบในรูปภาพ)
     st.write("**รหัสผ่านไฟล์ PDF (ถ้ามี)**")
-    password = st.text_input("ใส่รหัสผ่านที่นี่", type="password", label_visibility="collapsed")
+    password = st.text_input("Password", type="password", label_visibility="collapsed")
 
-    # --- ปุ่มเริ่มแปลงไฟล์ ---
-    st.write("") # เว้นวรรค
+    # 4. ปุ่มเริ่มการแปลงไฟล์
+    st.write("")
     convert_button = st.button("เริ่มการแปลงไฟล์")
 
-    # logic การทำงานเมื่อกดปุ่ม
-    if convert_button:
-        if pdf_file:
-            try:
-                with st.spinner("กำลังประมวลผล..."):
-                    # 1. ปลดล็อก PDF
-                    pdf_bytes = pdf_file.read()
-                    # ใช้ pikepdf ปลดล็อครหัสผ่าน
-                    with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                        unlocked_io = io.BytesIO()
-                        pdf.save(unlocked_io)
-                        unlocked_io.seek(0)
-                        
-                        # 2. อ่านข้อมูล
-                        data_rows = parse_pdf_content(unlocked_io)
-                        header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
-                        df = pd.DataFrame(data_rows, columns=header)
-                        
-                        # 3. จัดรูปแบบข้อมูล
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
+# --- Logic การทำงานเมื่อกดปุ่ม ---
+if convert_button:
+    if pdf_file:
+        try:
+            with st.spinner("กำลังประมวลผล..."):
+                # 1. ปลดล็อก PDF
+                pdf_bytes = pdf_file.read()
+                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                    unlocked_io = io.BytesIO()
+                    pdf.save(unlocked_io)
+                    unlocked_io.seek(0)
+                    
+                    # 2. อ่านข้อมูล
+                    data_rows = parse_pdf_content(unlocked_io)
+                    header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                    df = pd.DataFrame(data_rows, columns=header)
+                    
+                    # 3. จัดรูปแบบข้อมูล
+                    df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
 
-                        # 4. สร้าง Excel
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
-                            df.to_excel(writer, index=False, sheet_name='Statement')
-                            workbook, worksheet = writer.book, writer.sheets['Statement']
-                            
-                            date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
-                            num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
+                    # 4. สร้าง Excel
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Statement')
+                        workbook, worksheet = writer.book, writer.sheets['Statement']
+                        
+                        date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
+                        num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
 
-                            worksheet.set_column('A:A', 12, date_fmt)
-                            worksheet.set_column('D:E', 18, num_fmt)
-                            worksheet.set_column('B:B', 10)
-                            worksheet.set_column('C:C', 25)
-                            worksheet.set_column('F:G', 45)
-                        
-                        output.seek(0)
-                        
-                        # 5. แสดงผลและปุ่มดาวน์โหลด
-                        st.success(f"✅ แปลงไฟล์สำหรับธนาคาร {bank_option} สำเร็จ!")
-                        st.dataframe(df.head(10), use_container_width=True)
-                        
-                        st.download_button(
-                            label="📥 ดาวน์โหลดไฟล์ Excel",
-                            data=output,
-                            file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
+                        worksheet.set_column('A:A', 12, date_fmt)
+                        worksheet.set_column('D:E', 18, num_fmt)
+                        worksheet.set_column('B:B', 10)
+                        worksheet.set_column('C:C', 25)
+                        worksheet.set_column('F:G', 45)
+                    
+                    output.seek(0)
+                    
+                    # 5. แสดงผลในหน้าจอหลัก
+                    st.success(f"✅ แปลงไฟล์สำเร็จ ({bank_option})")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    st.download_button(
+                        label="📥 ดาวน์โหลดไฟล์ Excel",
+                        data=output,
+                        file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
-            except PasswordError:
-                st.error("❌ รหัสผ่านไม่ถูกต้อง หรือไฟล์ถูกล็อกด้วยระบบที่ซับซ้อน")
-            except Exception as e:
-                st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
-        else:
-            st.warning("⚠️ กรุณาเลือกไฟล์ PDF ก่อนกดปุ่ม")
+        except PasswordError:
+            st.sidebar.error("❌ รหัสผ่านไม่ถูกต้อง")
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+    else:
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF")
