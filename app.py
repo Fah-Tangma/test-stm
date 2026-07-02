@@ -46,7 +46,7 @@ def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
-    current_row = None 
+    current_row = None
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
@@ -58,30 +58,16 @@ def parse_pdf_content(pdf_stream):
             for line in lines:
                 line = line.strip()
                 if not line: continue
-                
-                # ตรวจสอบหัวตาราง
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-                
-                # ตรวจสอบท้ายตาราง
-                if is_in_table and any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
-                    if current_row:
-                        all_parsed_rows.append(current_row)
-                        current_row = None
+                if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
-                if not is_in_table: continue
-
-                # ตรวจสอบว่าบรรทัดนี้คือรายการใหม่ (มีวันที่) หรือไม่
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
-                
                 if date_match:
-                    # บันทึกรายการก่อนหน้าที่สะสมไว้
-                    if current_row:
-                        all_parsed_rows.append(current_row)
-                    
+                    if current_row: all_parsed_rows.append(current_row)
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
@@ -107,41 +93,44 @@ def parse_pdf_content(pdf_stream):
                         if len(parts) > 1: remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
-                    # สร้างรายการใหม่รอไว้
                     current_row = [date, time, desc, amount_val, balance, chan, det]
-                
                 elif is_in_table:
-                    # กรณีไม่มีวันที่ (บรรทัดเสริม) ให้เอาไปขึ้นบรรทัดใหม่ในรายละเอียดของรายการปัจจุบัน
-                    if current_row:
-                        if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                        
-                        c_extra, d_extra = split_channel_and_detail(line)
-                        # อัปเดตช่องทางถ้าเดิมยังเป็นค่าว่าง
-                        if c_extra != "-" and current_row[5] == "-":
-                            current_row[5] = c_extra
-                        
-                        # นำรายละเอียดเสริมไป "ขึ้นบรรทัดใหม่" (\n) ในช่องรายละเอียด
-                        if d_extra:
-                            if current_row[6] and current_row[6] != "-":
-                                current_row[6] += f"\n{d_extra}"
-                            else:
-                                current_row[6] = d_extra
+                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
+                    c_extra, d_extra = split_channel_and_detail(line)
+                    all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-        # เก็บรายการสุดท้าย
-        if current_row:
-            all_parsed_rows.append(current_row)
+        if current_row: all_parsed_rows.append(current_row)
 
-    # กรองเฉพาะรายการที่เป็นธุรกรรม
     final_rows = []
-    bf_count = 0
+    bf_occurrence = 0
+    empty_row_buffer = []
+
+    def flush_buffer(buffer_list, target_list):
+        if len(buffer_list) == 1:
+            target_list.append(buffer_list[0])
+
     for row in all_parsed_rows:
         desc = str(row[2])
-        if any(kw in desc for kw in bf_keywords):
-            bf_count += 1
-            if bf_count <= 1: final_rows.append(row)
-            continue
-        final_rows.append(row)
+        amount = row[3]
+        is_bf = any(kw in desc for kw in bf_keywords)
 
+        if is_bf:
+            flush_buffer(empty_row_buffer, final_rows)
+            empty_row_buffer = []
+            bf_occurrence += 1
+            if bf_occurrence <= 1:
+                final_rows.append(row)
+            continue
+
+        if amount is not None:
+            flush_buffer(empty_row_buffer, final_rows)
+            empty_row_buffer = []
+            final_rows.append(row)
+        else:
+            if row[5] != "-" or row[6] != "":
+                empty_row_buffer.append(row)
+
+    flush_buffer(empty_row_buffer, final_rows)
     return final_rows
 
 # ================= 3. ส่วนการแสดงผล (UI) =================
