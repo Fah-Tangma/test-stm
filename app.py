@@ -128,7 +128,7 @@ st.title("📑 PDF Statement to Excel")
 st.info("อัปโหลดไฟล์ที่แถบด้านข้าง เพื่อเริ่มต้นการแปลงข้อมูล")
 
 with st.sidebar:
-    st.header("ตั้งค่าการแปลงไฟล์")
+    st.header("STM to Excel")
     
     # 1. เพิ่มตัวเลือกธนาคาร
     bank_option = st.selectbox(
