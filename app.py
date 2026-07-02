@@ -7,9 +7,41 @@ import streamlit as st
 from pikepdf import PasswordError
 
 # ตั้งค่าหน้าเว็บ Streamlit
-st.set_page_config(page_title="PDF Statement Converter", layout="wide")
+st.set_page_config(page_title="PDF Statement Converter", page_icon="📑", layout="wide")
 
-# ================= 1. ฟังก์ชันช่วยเหลือ (Utility) =================
+# ปรับแต่ง CSS เพื่อจัดทุกอย่างให้อยู่กึ่งกลางและดูพรีเมียม
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;700&display=swap');
+    html, body, [class*="css"] {
+        font-family: 'Sarabun', sans-serif;
+    }
+    .main {
+        background-color: #0e1117;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 10px;
+        height: 3em;
+        background-color: #2e7d32;
+        color: white;
+        font-weight: bold;
+        border: none;
+    }
+    .stDownloadButton>button {
+        width: 100%;
+        border-radius: 10px;
+        background-color: #1565c0;
+        color: white;
+    }
+    div[data-testid="stExpander"] {
+        border: none;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ================= 1. ฟังก์ชันช่วยเหลือ (Utility) - คงเดิม =================
 def split_channel_and_detail(text):
     channels = [
         "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
@@ -30,7 +62,7 @@ def str_to_float(val_str):
     try: return float(str(val_str).replace(',', ''))
     except: return None
 
-# ================= 2. Logic การอ่าน PDF (คงเดิมตามของคุณ) =================
+# ================= 2. Logic การอ่าน PDF - คงเดิม =================
 def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -122,65 +154,98 @@ def parse_pdf_content(pdf_stream):
     flush_buffer(empty_row_buffer, final_rows)
     return final_rows
 
-# ================= 3. ส่วนการแสดงผล (Streamlit UI) =================
-st.title("📑 PDF to Excel Converter")
-st.write("อัปโหลดไฟล์ PDF Statement เพื่อแปลงเป็นไฟล์ Excel")
+# ================= 3. ส่วนการแสดงผล (New Centered UI) =================
 
-with st.sidebar:
-    st.header("STM to Excel")
-    pdf_file = st.file_uploader("เลือกไฟล์ PDF", type="pdf")
-    password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
+# ใช้ columns เพื่อจัดวางทุกอย่างไว้กึ่งกลาง
+col1, col2, col3 = st.columns([1, 2, 1])
+
+with col2:
+    st.markdown("<h1 style='text-align: center;'>📑 PDF to Excel Converter</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>แปลงไฟล์ Statement เป็น Excel ง่ายๆ ในไม่กี่วินาที</p>", unsafe_allow_html=True)
+    st.write("---")
+
+    # ส่วนเลือกธนาคาร
+    bank_option = st.selectbox(
+        "🏦 เลือกธนาคาร",
+        ("KBank (กสิกรไทย)", "SCB (ไทยพาณิชย์) - เร็วๆ นี้", "BBL (กรุงเทพ) - เร็วๆ นี้", "อื่นๆ"),
+        help="ระบบกำลังพัฒนาให้รองรับธนาคารอื่นๆ เพิ่มเติมในเร็วๆ นี้"
+    )
+
+    # ส่วนอัปโหลดไฟล์
+    pdf_file = st.file_uploader("📂 เลือกไฟล์ PDF Statement", type="pdf")
+    
+    # ส่วนรหัสผ่าน
+    password = st.text_input("🔑 รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
+
+    # ปุ่มเริ่มแปลงไฟล์
     convert_button = st.button("เริ่มการแปลงไฟล์")
 
-if convert_button and pdf_file:
-    try:
-        with st.spinner("กำลังประมวลผล..."):
-            # 1. ปลดล็อก PDF
-            pdf_bytes = pdf_file.read()
-            with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                unlocked_io = io.BytesIO()
-                pdf.save(unlocked_io)
-                unlocked_io.seek(0)
-                
-                # 2. อ่านข้อมูล
-                data_rows = parse_pdf_content(unlocked_io)
-                header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
-                df = pd.DataFrame(data_rows, columns=header)
-                
-                # 3. จัดรูปแบบข้อมูล
-                df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
-
-                # 4. สร้าง Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
-                    df.to_excel(writer, index=False, sheet_name='Statement')
-                    workbook, worksheet = writer.book, writer.sheets['Statement']
+    # --- การประมวลผลหลังกดปุ่ม ---
+    if convert_button and pdf_file:
+        try:
+            with st.spinner("กำลังประมวลผลข้อมูล..."):
+                # 1. ปลดล็อก PDF
+                pdf_bytes = pdf_file.read()
+                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                    unlocked_io = io.BytesIO()
+                    pdf.save(unlocked_io)
+                    unlocked_io.seek(0)
                     
-                    date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
+                    # 2. อ่านข้อมูล
+                    data_rows = parse_pdf_content(unlocked_io)
+                    header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                    df = pd.DataFrame(data_rows, columns=header)
+                    
+                    # 3. จัดรูปแบบข้อมูล
+                    df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
 
-                    worksheet.set_column('A:A', 12, date_fmt)
-                    worksheet.set_column('D:E', 18, num_fmt)
-                    worksheet.set_column('B:B', 10)
-                    worksheet.set_column('C:C', 25)
-                    worksheet.set_column('F:G', 45)
-                
-                output.seek(0)
-                
-                # 5. แสดงผลและปุ่มดาวน์โหลด
-                st.success("✅ แปลงไฟล์สำเร็จ!")
-                st.dataframe(df.head(20)) # โชว์ตัวอย่าง 20 แถว
-                
-                st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ Excel",
-                    data=output,
-                    file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                    # 4. สร้าง Excel
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='dd/mm/yyyy') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Statement')
+                        workbook, worksheet = writer.book, writer.sheets['Statement']
+                        
+                        date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'align': 'left'})
+                        num_fmt = workbook.add_format({'num_format': '#,##0.00'})
 
-    except PasswordError:
-        st.error("❌ รหัสผ่านไม่ถูกต้อง")
-    except Exception as e:
-        st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
-elif convert_button and not pdf_file:
-    st.warning("⚠️ กรุณาเลือกไฟล์ PDF ก่อนกดปุ่ม")
+                        worksheet.set_column('A:A', 12, date_fmt)
+                        worksheet.set_column('D:E', 18, num_fmt)
+                        worksheet.set_column('B:B', 10)
+                        worksheet.set_column('C:C', 25)
+                        worksheet.set_column('F:G', 45)
+                    
+                    output.seek(0)
+                    
+                    # 5. แสดงผลลัพธ์
+                    st.success("✅ แปลงไฟล์สำเร็จเรียบร้อย!")
+                    
+                    # เพิ่ม Metrics สรุปสั้นๆ
+                    total_in = df[df['ถอนเงิน/ฝากเงิน'] > 0]['ถอนเงิน/ฝากเงิน'].sum()
+                    total_out = df[df['ถอนเงิน/ฝากเงิน'] < 0]['ถอนเงิน/ฝากเงิน'].sum()
+                    
+                    m1, m2 = st.columns(2)
+                    m1.metric("ยอดรวมเงินเข้า", f"{total_in:,.2f} ฿")
+                    m2.metric("ยอดรวมเงินออก", f"{abs(total_out):,.2f} ฿")
+
+                    # ปุ่มดาวน์โหลด
+                    st.download_button(
+                        label="📥 ดาวน์โหลดไฟล์ Excel",
+                        data=output,
+                        file_name=f"Converted_{pdf_file.name.split('.')[0]}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+                    with st.expander("ดูตัวอย่างข้อมูล 20 แถวแรก"):
+                        st.dataframe(df.head(20), use_container_width=True)
+
+        except PasswordError:
+            st.error("❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง")
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+    
+    elif convert_button and not pdf_file:
+        st.warning("⚠️ กรุณาเลือกไฟล์ PDF ก่อนกดปุ่ม")
+
+# ท้ายหน้าเว็บ
+st.write("---")
+st.caption("<p style='text-align: center;'>Smart Statement Converter v2.0 | ข้อมูลของคุณปลอดภัยและไม่ถูกเก็บไว้ในเซิร์ฟเวอร์</p>", unsafe_allow_html=True)
