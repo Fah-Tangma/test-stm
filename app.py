@@ -123,7 +123,7 @@ if convert_button:
                     df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
 
                     output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='dd/mm/yyyy') as writer:
+                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                         df.to_excel(writer, index=False, sheet_name='Statement')
                         workbook = writer.book
                         worksheet = writer.sheets['Statement']
@@ -135,7 +135,7 @@ if convert_button:
                             'align': 'right'
                         })
                         
-                        date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'align': 'left'})
+                        date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
 
                         # ปรับแต่งคอลัมน์
                         worksheet.set_column('A:A', 15, date_fmt) # วันที่
