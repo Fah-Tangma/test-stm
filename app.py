@@ -1,17 +1,15 @@
 import io
 import re
-import os
 import pandas as pd
 import pikepdf
 import pdfplumber
-from flask import Flask, render_template, request, send_file, make_response
+import streamlit as st
 from pikepdf import PasswordError
 
-app = Flask(__name__)
-app.secret_key = "full_stm_converter_v4_final"
+# ตั้งค่าหน้าเว็บ Streamlit
+st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= 1. ฟังก์ชันช่วยเหลือ (Utility) =================
-
 def split_channel_and_detail(text):
     channels = [
         "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
@@ -32,8 +30,7 @@ def str_to_float(val_str):
     try: return float(str(val_str).replace(',', ''))
     except: return None
 
-# ================= 2. Logic การอ่านและกรอง PDF (Filtering Logic ตามที่คุณกำหนด) =================
-
+# ================= 2. Logic การอ่าน PDF (คงเดิมตามของคุณ) =================
 def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -125,60 +122,65 @@ def parse_pdf_content(pdf_stream):
     flush_buffer(empty_row_buffer, final_rows)
     return final_rows
 
-# ================= 3. Routes =================
+# ================= 3. ส่วนการแสดงผล (Streamlit UI) =================
+st.title("📑 PDF to Excel Converter")
+st.write("อัปโหลดไฟล์ PDF Statement เพื่อแปลงเป็นไฟล์ Excel")
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+with st.sidebar:
+    st.header("STM to Excel")
+    pdf_file = st.file_uploader("เลือกไฟล์ PDF", type="pdf")
+    password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
+    convert_button = st.button("เริ่มการแปลงไฟล์")
 
-@app.route('/convert', methods=['POST'])
-def convert():
-    file = request.files.get('pdf_file')
-    password = request.form.get('password', '').strip()
-
-    if not file or file.filename == '':
-        return "กรุณาเลือกไฟล์ PDF", 400
-
-    download_name = f"{os.path.splitext(file.filename)[0]}.xlsx"
-
+if convert_button and pdf_file:
     try:
-        pdf_bytes = io.BytesIO(file.read())
-        with pikepdf.open(pdf_bytes, password=password) as pdf:
-            unlocked_io = io.BytesIO()
-            pdf.save(unlocked_io)
-            unlocked_io.seek(0)
-            
-            data_rows = parse_pdf_content(unlocked_io)
-            header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
-            df = pd.DataFrame(data_rows, columns=header)
-            
-            df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
-
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
-                df.to_excel(writer, index=False, sheet_name='Statement')
-                workbook, worksheet = writer.book, writer.sheets['Statement']
+        with st.spinner("กำลังประมวลผล..."):
+            # 1. ปลดล็อก PDF
+            pdf_bytes = pdf_file.read()
+            with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                unlocked_io = io.BytesIO()
+                pdf.save(unlocked_io)
+                unlocked_io.seek(0)
                 
-                date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
-                num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
+                # 2. อ่านข้อมูล
+                data_rows = parse_pdf_content(unlocked_io)
+                header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                df = pd.DataFrame(data_rows, columns=header)
+                
+                # 3. จัดรูปแบบข้อมูล
+                df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
 
-                worksheet.set_column('A:A', 12, date_fmt)
-                worksheet.set_column('D:E', 18, num_fmt)
-                worksheet.set_column('B:B', 10)
-                worksheet.set_column('C:C', 25)
-                worksheet.set_column('F:G', 45)
+                # 4. สร้าง Excel
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='mm/dd/yyyy') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Statement')
+                    workbook, worksheet = writer.book, writer.sheets['Statement']
+                    
+                    date_fmt = workbook.add_format({'num_format': 'mm/dd/yyyy', 'align': 'left'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'})
 
-            output.seek(0)
-            
-            # --- ส่งไฟล์พร้อมตั้งค่า Cookie เพื่อบอก JS ว่าเสร็จแล้ว ---
-            response = make_response(send_file(output, as_attachment=True, download_name=download_name))
-            response.set_cookie('download_started', 'true', path='/')
-            return response
+                    worksheet.set_column('A:A', 12, date_fmt)
+                    worksheet.set_column('D:E', 18, num_fmt)
+                    worksheet.set_column('B:B', 10)
+                    worksheet.set_column('C:C', 25)
+                    worksheet.set_column('F:G', 45)
+                
+                output.seek(0)
+                
+                # 5. แสดงผลและปุ่มดาวน์โหลด
+                st.success("✅ แปลงไฟล์สำเร็จ!")
+                st.dataframe(df.head(20)) # โชว์ตัวอย่าง 20 แถว
+                
+                st.download_button(
+                    label="📥 ดาวน์โหลดไฟล์ Excel",
+                    data=output,
+                    file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
     except PasswordError:
-        return "รหัสผ่านไม่ถูกต้อง", 401
+        st.error("❌ รหัสผ่านไม่ถูกต้อง")
     except Exception as e:
-        return f"เกิดข้อผิดพลาด: {str(e)}", 500
-
-if __name__ == "__main__":
-    app.run(debug=True, port=8080)
+        st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+elif convert_button and not pdf_file:
+    st.warning("⚠️ กรุณาเลือกไฟล์ PDF ก่อนกดปุ่ม")
