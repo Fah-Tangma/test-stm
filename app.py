@@ -124,7 +124,7 @@ def parse_pdf_content(pdf_stream):
 
 # ================= 3. ส่วนการแสดงผล (ปรับปรุงเพื่อรองรับหลายไฟล์) =================
 
-st.title("📑 Multi-PDF Statement to Single Excel")
+st.title("📑 PDF Statement to Excel")
 st.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
 
 with st.sidebar:
