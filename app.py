@@ -30,7 +30,7 @@ def str_to_float(val_str):
     try: return float(str(val_str).replace(',', ''))
     except: return None
 
-# ================= 2. Logic การอ่าน PDF =================
+# ================= 2. Logic การอ่าน PDF พร้อมเงื่อนไขการลบแถว =================
 def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -87,12 +87,52 @@ def parse_pdf_content(pdf_stream):
 
                 elif is_in_table:
                     if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                    if any(kw in line for kw in bf_keywords): continue
-                    
                     c_extra, d_extra = split_channel_and_detail(line)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    return all_parsed_rows
+    # --- เริ่มกระบวนการกรองข้อมูลตามเงื่อนไข ---
+    
+    # เงื่อนไขที่ 2: ลบ "ยอดยกมา" ทั้งหมด ยกเว้นอันแรกสุดที่เจอ
+    temp_list_bf = []
+    found_first_bf = False
+    for row in all_parsed_rows:
+        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
+        if is_bf_row:
+            if not found_first_bf:
+                temp_list_bf.append(row)
+                found_first_bf = True
+            # ถ้าเจอตัวที่สองเป็นต้นไป จะไม่ถูก append เข้าไป (ลบทิ้ง)
+        else:
+            temp_list_bf.append(row)
+
+    # เงื่อนไขที่ 1: ลบกลุ่มแถวว่าง (ไม่มีจำนวนเงิน) ที่ติดต่อกันมากกว่า 1 แถว
+    final_filtered_rows = []
+    i = 0
+    n = len(temp_list_bf)
+    while i < n:
+        # ถ้าแถวนี้มีจำนวนเงิน (amount_val อยู่ index 3) ให้เก็บไว้ปกติ
+        if temp_list_bf[i][3] is not None:
+            final_filtered_rows.append(temp_list_bf[i])
+            i += 1
+        else:
+            # เริ่มตรวจสอบกลุ่มแถวว่าง (รายละเอียดเสริม)
+            empty_block = []
+            while i < n and temp_list_bf[i][3] is None:
+                # ตรวจสอบเพิ่มเติมว่าไม่ใช่แถว "ยอดยกมา" ตัวแรกที่เราเก็บไว้ (ซึ่งบางทีอาจไม่มี amount_val)
+                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
+                    final_filtered_rows.append(temp_list_bf[i])
+                    i += 1
+                    continue
+                
+                empty_block.append(temp_list_bf[i])
+                i += 1
+            
+            # ถ้ามีแถวว่างบรรทัดเดียว (เป็นรายละเอียดของรายการก่อนหน้า) ให้เก็บไว้
+            if len(empty_block) == 1:
+                final_filtered_rows.append(empty_block[0])
+            # ถ้ามีมากกว่า 1 แถว (len > 1) บล็อกนี้จะถูกข้ามไปทั้งหมด (ลบออก)
+            
+    return final_filtered_rows
 
 # ================= 3. ส่วนการแสดงผล =================
 
@@ -128,8 +168,6 @@ if convert_button:
                         workbook = writer.book
                         worksheet = writer.sheets['Statement']
                         
-                        # แก้ไขรูปแบบตัวเลขตามที่คุณต้องการ
-                        # รูปแบบ: _(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)
                         num_fmt = workbook.add_format({
                             'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
                             'align': 'right'
@@ -137,13 +175,12 @@ if convert_button:
                         
                         date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
 
-                        # ปรับแต่งคอลัมน์
-                        worksheet.set_column('A:A', 15, date_fmt) # วันที่
-                        worksheet.set_column('B:B', 10)           # เวลา
-                        worksheet.set_column('C:C', 20)           # รายการ
-                        worksheet.set_column('D:E', 20, num_fmt)  # ถอนเงิน/ฝากเงิน และ ยอดคงเหลือ (ใช้รูปแบบใหม่)
-                        worksheet.set_column('F:F', 20)           # ช่องทาง
-                        worksheet.set_column('G:G', 50)           # รายละเอียด
+                        worksheet.set_column('A:A', 15, date_fmt)
+                        worksheet.set_column('B:B', 10)
+                        worksheet.set_column('C:C', 20)
+                        worksheet.set_column('D:E', 20, num_fmt)
+                        worksheet.set_column('F:F', 20)
+                        worksheet.set_column('G:G', 50)
                     
                     output.seek(0)
                     st.success(f"✅ แปลงไฟล์สำเร็จ")
