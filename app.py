@@ -9,7 +9,7 @@ from pikepdf import PasswordError
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
-# ปรับแต่ง UI เล็กน้อยให้ดูสะอาดตา
+# ปรับแต่ง UI
 st.markdown("""
     <style>
     .stDownloadButton > button {
@@ -41,12 +41,13 @@ def str_to_float(val_str):
     try: return float(str(val_str).replace(',', ''))
     except: return None
 
-# ================= 2. Logic การอ่าน PDF (ปรับปรุงการรวมบรรทัด) =================
+# ================= 2. Logic การอ่าน PDF (แก้ไขเรื่องบรรทัดสลับ) =================
 def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
-    current_row = None
+    
+    current_row = None  # ตัวแปรเก็บข้อมูลรายการปัจจุบัน
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
@@ -58,27 +59,39 @@ def parse_pdf_content(pdf_stream):
             for line in lines:
                 line = line.strip()
                 if not line: continue
+                
+                # ตรวจสอบหัวตาราง
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-                if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
+                
+                # ตรวจสอบจุดจบรายการ
+                if is_in_table and any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
+                if not is_in_table: continue
+
+                # ตรวจสอบว่าเป็นบรรทัดเริ่มต้นรายการใหม่ (มีวันที่) หรือไม่
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
+                
                 if date_match:
-                    if current_row: all_parsed_rows.append(current_row)
+                    # บันทึกรายการก่อนหน้าที่สะสมไว้ลง list
+                    if current_row:
+                        all_parsed_rows.append(current_row)
+                    
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     
+                    # แยก Description
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
                     
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
-                    amount_val, balance = None, None
                     
+                    amount_val, balance = None, None
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
@@ -93,44 +106,46 @@ def parse_pdf_content(pdf_stream):
                         if len(parts) > 1: remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
+                    
+                    # เริ่มต้นสร้างรายการใหม่
                     current_row = [date, time, desc, amount_val, balance, chan, det]
-                elif is_in_table:
-                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                    c_extra, d_extra = split_channel_and_detail(line)
-                    all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
+                
+                else:
+                    # --- กรณีบรรทัดไม่มีวันที่ (ข้อมูลเสริม) ---
+                    if current_row:
+                        # ข้ามบรรทัดที่ไม่ใช่ข้อมูล
+                        if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
+                        
+                        c_extra, d_extra = split_channel_and_detail(line)
+                        
+                        # รวม Channel ถ้าของเดิมไม่มี
+                        if c_extra != "-" and current_row[5] == "-":
+                            current_row[5] = c_extra
+                        
+                        # รวมรายละเอียด (ขึ้นบรรทัดใหม่ด้วย \n)
+                        if d_extra:
+                            if current_row[6] and current_row[6] != "-":
+                                current_row[6] += f"\n{d_extra}"
+                            else:
+                                current_row[6] = d_extra
 
-        if current_row: all_parsed_rows.append(current_row)
+        # เก็บรายการสุดท้ายหลังจบลูป
+        if current_row:
+            all_parsed_rows.append(current_row)
 
+    # กรอง 'ยอดยกมา' และจัดระเบียบครั้งสุดท้าย
     final_rows = []
-    bf_occurrence = 0
-    empty_row_buffer = []
-
-    def flush_buffer(buffer_list, target_list):
-        if len(buffer_list) == 1:
-            target_list.append(buffer_list[0])
-
+    bf_count = 0
     for row in all_parsed_rows:
         desc = str(row[2])
-        amount = row[3]
-        is_bf = any(kw in desc for kw in bf_keywords)
-
-        if is_bf:
-            flush_buffer(empty_row_buffer, final_rows)
-            empty_row_buffer = []
-            bf_occurrence += 1
-            if bf_occurrence <= 1:
+        # ตรวจสอบว่าเป็น 'ยอดยกมา' หรือไม่
+        if any(kw in desc for kw in bf_keywords):
+            bf_count += 1
+            if bf_count <= 1: # เก็บเฉพาะยอดยกมาอันแรกสุดของไฟล์
                 final_rows.append(row)
             continue
+        final_rows.append(row)
 
-        if amount is not None:
-            flush_buffer(empty_row_buffer, final_rows)
-            empty_row_buffer = []
-            final_rows.append(row)
-        else:
-            if row[5] != "-" or row[6] != "":
-                empty_row_buffer.append(row)
-
-    flush_buffer(empty_row_buffer, final_rows)
     return final_rows
 
 # ================= 3. ส่วนการแสดงผล (UI) =================
@@ -160,11 +175,13 @@ if convert_button:
                     pdf.save(unlocked_io)
                     unlocked_io.seek(0)
                     
+                    # ประมวลผลข้อมูล
                     data_rows = parse_pdf_content(unlocked_io)
+                    
                     header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
                     df = pd.DataFrame(data_rows, columns=header)
                     
-                    # แปลงวันที่
+                    # แปลงวันที่เพื่อใช้ใน Excel
                     df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
 
                     # สร้าง Excel
@@ -173,30 +190,29 @@ if convert_button:
                         df.to_excel(writer, index=False, sheet_name='Statement')
                         workbook, worksheet = writer.book, writer.sheets['Statement']
                         
-                        # สร้าง Format สำหรับ Wrap Text (ขึ้นบรรทัดใหม่)
-                        wrap_fmt = workbook.add_format({'text_wrap': True, 'valign': 'top'})
+                        # Format สำหรับ Wrap Text (ขึ้นบรรทัดใหม่ใน Cell)
+                        wrap_fmt = workbook.add_format({'text_wrap': True, 'valign': 'top', 'font_name': 'Tahoma', 'font_size': 10})
                         date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'align': 'left', 'valign': 'top'})
                         num_fmt = workbook.add_format({'num_format': '#,##0.00', 'valign': 'top'})
-                        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
 
-                        # กำหนดความกว้างคอลัมน์และตั้งค่า Wrap Text
+                        # ตั้งค่าความกว้างคอลัมน์และเปิด Wrap Text
                         worksheet.set_column('A:A', 12, date_fmt)
                         worksheet.set_column('B:B', 8, wrap_fmt)
-                        worksheet.set_column('C:C', 20, wrap_fmt)
+                        worksheet.set_column('C:C', 15, wrap_fmt)
                         worksheet.set_column('D:E', 15, num_fmt)
-                        worksheet.set_column('F:F', 20, wrap_fmt)
-                        worksheet.set_column('G:G', 50, wrap_fmt) # ช่องรายละเอียดตั้งให้กว้างและ Wrap
+                        worksheet.set_column('F:F', 15, wrap_fmt)
+                        worksheet.set_column('G:G', 50, wrap_fmt) # คอลัมน์รายละเอียดสำคัญที่สุดเรื่อง Wrap
                     
                     output.seek(0)
                     
                     st.success(f"✅ แปลงไฟล์สำเร็จ ({bank_option})")
-                    # แสดงตัวอย่างใน Streamlit (ในเว็บจะเห็น \n เป็นช่องว่าง แต่ใน Excel จะขึ้นบรรทัดใหม่ให้ครับ)
+                    # แสดงตัวอย่างข้อมูล (หมายเหตุ: ใน streamlit dataframe อาจไม่โชว์การขึ้นบรรทัดใหม่ชัดเจน แต่ใน Excel จะถูกต้องครับ)
                     st.dataframe(df, use_container_width=True)
                     
                     st.download_button(
                         label="📥 ดาวน์โหลดไฟล์ Excel",
                         data=output,
-                        file_name=f"{pdf_file.name.split('.')[0]}.xlsx",
+                        file_name=f"Converted_{pdf_file.name.split('.')[0]}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
 
