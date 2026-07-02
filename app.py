@@ -47,27 +47,42 @@ def parse_pdf_content(pdf_stream):
             for line in lines:
                 line = line.strip()
                 if not line: continue
+                
+                # ตรวจสอบหัวตาราง
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-                if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
+                
+                # ตรวจสอบจุดจบตาราง
+                if is_in_table and any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
+                if not is_in_table:
+                    continue
+
+                # ตรวจสอบว่าเป็นบรรทัดใหม่ที่มี "วันที่" หรือไม่
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
+                
                 if date_match:
-                    if current_row: all_parsed_rows.append(current_row)
+                    # ถ้าเจอวันที่ใหม่ ให้เก็บแถวเก่าลง list ก่อน
+                    if current_row:
+                        all_parsed_rows.append(current_row)
+                    
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
+                    
+                    # ค้นหาตัวเลขยอดเงิน (ถอน/ฝาก/คงเหลือ)
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     
+                    # แยกคำอธิบายรายการ (Description)
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
                     
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
-                    amount_val, balance = None, None
                     
+                    amount_val, balance = None, None
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
@@ -76,50 +91,46 @@ def parse_pdf_content(pdf_stream):
                         amount_val = val if is_deposit else -val
                         balance = str_to_float(amounts[-1])
 
+                    # หาข้อมูลที่เหลือหลังยอดเงินตัวสุดท้าย (Channel/Detail)
                     remaining = ""
                     if amounts:
                         parts = line.split(amounts[-1])
                         if len(parts) > 1: remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
+                    
+                    # สร้างแถวใหม่
                     current_row = [date, time, desc, amount_val, balance, chan, det]
-                elif is_in_table:
-                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                    c_extra, d_extra = split_channel_and_detail(line)
-                    all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
+                
+                else:
+                    # --- จุดที่แก้ไข: ถ้าไม่เจอวันที่ แต่ยังอยู่ในตาราง ให้เอาข้อความไป "ต่อท้าย" รายละเอียดของแถวปัจจุบัน ---
+                    if current_row:
+                        # กรองคำที่ไม่ต้องการออก
+                        if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ", "วันที่"]): 
+                            continue
+                        
+                        # แยกส่วน Channel/Detail จากบรรทัดเสริม (ถ้ามี)
+                        c_extra, d_extra = split_channel_and_detail(line)
+                        
+                        # ถ้ามี Channel ใหม่ให้ใส่ (ถ้าว่างให้ข้าม)
+                        if c_extra != "-" and current_row[5] == "-":
+                            current_row[5] = c_extra
+                        
+                        # ต่อท้ายรายละเอียด (ใช้ช่องว่างคั่น)
+                        if d_extra:
+                            current_row[6] = f"{current_row[6]} {d_extra}".strip()
 
-        if current_row: all_parsed_rows.append(current_row)
+        # เก็บแถวสุดท้ายหลังจบลูป
+        if current_row:
+            all_parsed_rows.append(current_row)
 
+    # กรองเฉพาะรายการที่เป็นธุรกรรมจริงๆ (ตัด 'ยอดยกมา' ออกถ้าต้องการ หรือเก็บไว้ก็ได้)
     final_rows = []
-    bf_occurrence = 0
-    empty_row_buffer = []
-
-    def flush_buffer(buffer_list, target_list):
-        if len(buffer_list) == 1:
-            target_list.append(buffer_list[0])
-
     for row in all_parsed_rows:
         desc = str(row[2])
-        amount = row[3]
-        is_bf = any(kw in desc for kw in bf_keywords)
-
-        if is_bf:
-            flush_buffer(empty_row_buffer, final_rows)
-            empty_row_buffer = []
-            bf_occurrence += 1
-            if bf_occurrence <= 1:
-                final_rows.append(row)
-            continue
-
-        if amount is not None:
-            flush_buffer(empty_row_buffer, final_rows)
-            empty_row_buffer = []
+        if not any(kw in desc for kw in bf_keywords):
             final_rows.append(row)
-        else:
-            if row[5] != "-" or row[6] != "":
-                empty_row_buffer.append(row)
-
-    flush_buffer(empty_row_buffer, final_rows)
+            
     return final_rows
 
 # ================= 3. ส่วนการแสดงผล (Sidebar UI) =================
