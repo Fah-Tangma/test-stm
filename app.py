@@ -208,82 +208,86 @@ def parse_scb_content(pdf_stream):
     return all_parsed_rows
 
 # ================= 5. ส่วน UI Streamlit =================
-st.title("📑 Bank Statement to Excel Converter")
+st.title("📑 PDF Statement to Excel")
+st.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
 
 with st.sidebar:
-    st.header("ตั้งค่าการแปลงไฟล์")
-    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)", "กรุงไทย (KTB)", "ไทยพาณิชย์ (SCB)"])
+    st.header("Statement to Excel")
+    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)"])
     st.divider()
-    pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
+    # ปรับให้อัพโหลดได้หลายไฟล์
+    pdf_files = st.file_uploader("เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
-    convert_button = st.button("เริ่มการแปลงไฟล์")
+    convert_button = st.button("เริ่มการแปลงไฟล์ทั้งหมด")
 
 if convert_button:
     if pdf_files:
-        all_dfs = []
-        try:
-            progress_bar = st.progress(0)
-            for idx, uploaded_file in enumerate(pdf_files):
-                st.write(f"⏳ กำลังอ่าน: {uploaded_file.name}")
-                pdf_bytes = uploaded_file.read()
-                
-                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                    unlocked_io = io.BytesIO()
-                    pdf.save(unlocked_io)
-                    unlocked_io.seek(0)
+        if len(pdf_files) > 5:
+            st.error("❌ กรุณาเลือกไฟล์ไม่เกิน 5 ไฟล์")
+        else:
+            all_dataframes = []
+            status_container = st.container()
+            
+            try:
+                progress_bar = st.progress(0)
+                for index, uploaded_file in enumerate(pdf_files):
+                    status_container.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
                     
-                    if bank_option == "กสิกรไทย (KBank)":
-                        rows = parse_kbank_content(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ยอดเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce').dt.date
-                    elif bank_option == "กรุงไทย (KTB)":
-                        rows = parse_ktb_content(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ยอดเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%y', errors='coerce').dt.date
-                    else: # SCB
-                        rows = parse_scb_content(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ยอดเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce').dt.date
+                    pdf_bytes = uploaded_file.read()
+                    with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                        unlocked_io = io.BytesIO()
+                        pdf.save(unlocked_io)
+                        unlocked_io.seek(0)
+                        
+                        data_rows = parse_pdf_content(unlocked_io)
+                        header = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                        
+                        df_single = pd.DataFrame(data_rows, columns=header)
+                        # แปลงวันที่เพื่อให้เรียงลำดับได้ หรือรักษา Format
+                        df_single['วันที่'] = pd.to_datetime(df_single['วันที่'], format='%d-%m-%y', errors='coerce')
+                        
+                        all_dataframes.append(df_single)
                     
-                    all_dfs.append(df)
-                progress_bar.progress((idx + 1) / len(pdf_files))
+                    progress_bar.progress((index + 1) / len(pdf_files))
 
-            if all_dfs:
-                final_df = pd.concat(all_dfs, ignore_index=True)
-                
-                # สร้างไฟล์ Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    final_df.to_excel(writer, index=False, sheet_name='Combined')
-                    workbook = writer.book
-                    worksheet = writer.sheets['Combined']
+                if all_dataframes:
+                    # รวม DataFrame ทั้งหมดเข้าด้วยกัน
+                    final_df = pd.concat(all_dataframes, ignore_index=True)
                     
-                    # Formatting
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
-                    date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'border': 1})
-                    text_fmt = workbook.add_format({'border': 1})
+                    # (ทางเลือก) เรียงลำดับตามวันที่ถ้าต้องการ
+                    # final_df = final_df.sort_values(by=['วันที่', 'เวลา']).reset_index(drop=True)
 
-                    for col_num, value in enumerate(final_df.columns.values):
-                        worksheet.write(0, col_num, value, header_fmt)
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
+                        final_df.to_excel(writer, index=False, sheet_name='Combined_Statement')
+                        workbook = writer.book
+                        worksheet = writer.sheets['Combined_Statement']
+                        
+                        num_fmt = workbook.add_format({
+                            'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
+                            'align': 'right'
+                        })
+                        date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
+
+                        worksheet.set_column('A:A', 15, date_fmt)
+                        worksheet.set_column('B:B', 10)
+                        worksheet.set_column('C:C', 20)
+                        worksheet.set_column('D:E', 20, num_fmt)
+                        worksheet.set_column('F:F', 20)
+                        worksheet.set_column('G:G', 50)
                     
-                    worksheet.set_column('A:A', 12, date_fmt)
-                    worksheet.set_column('B:C', 12, text_fmt)
-                    worksheet.set_column('D:E', 18, num_fmt)
-                    worksheet.set_column('F:F', 15, text_fmt)
-                    worksheet.set_column('G:G', 60, text_fmt)
-
-                st.success("✅ แปลงไฟล์สำเร็จ!")
-                st.dataframe(final_df, use_container_width=True)
-                st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ Excel",
-                    data=output.getvalue(),
-                    file_name=f"Statement_{bank_option.split(' ')[0]}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        except PasswordError:
-            st.error("❌ รหัสผ่าน PDF ไม่ถูกต้อง")
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+                    output.seek(0)
+                    st.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
+                    st.dataframe(final_df, use_container_width=True)
+                    st.download_button(
+                        label="📥 ดาวน์โหลดไฟล์ Excel รวม", 
+                        data=output, 
+                        file_name="Combined_Statement.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            except PasswordError:
+                st.error("❌ รหัสผ่านไม่ถูกต้อง หรือไฟล์บางไฟล์ต้องการรหัสผ่านที่ต่างกัน")
+            except Exception as e:
+                st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
     else:
-        st.warning("⚠️ กรุณาอัปโหลดไฟล์ PDF ก่อน")
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์")
