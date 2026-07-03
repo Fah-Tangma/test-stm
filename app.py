@@ -11,18 +11,35 @@ st.set_page_config(page_title="PDF Statement Converter (Multi-Bank)", layout="wi
 
 # ================= 1. ฟังก์ชันช่วยเหลือทั่วไป =================
 def str_to_float(val_str):
-    if val_str is None: return 0.0
+    if val_str in [None, "", "-", " "]: return 0.0
     try:
-        clean_val = re.sub(r'[^\d.-]', '', str(val_str).replace(',', ''))
+        # ลบ comma และช่องว่าง
+        clean_val = str(val_str).replace(',', '').strip()
         return float(clean_val)
     except:
         return 0.0
 
+def split_channel_and_detail(text):
+    channels = [
+        "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
+        "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
+        "BRANCH", "K-Cash Connect Plus" , "Internet/Mobile GSB", "Internet/Mobile SCB", 
+        "Internet/Mobile KTB ", "Internet/Mobile TTB", "ตู้เติมเงิน / โมบาย แอปพลิชัน", "Internet/Mobile BAY"
+    ]
+    found_channel, detail_part = "-", text
+    for c in channels:
+        if c in text:
+            found_channel = c
+            detail_part = text.replace(c, "").strip()
+            break
+    return found_channel, detail_part
+
 # ================= 2. Logic สำหรับกสิกรไทย (KBank) =================
-def parse_kbank_content(pdf_stream):
+def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
+    bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
-    
+
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
             text = page.extract_text()
@@ -36,9 +53,12 @@ def parse_kbank_content(pdf_stream):
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-                
+                if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
+                    is_in_table = False
+                    continue
+
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
-                if date_match and is_in_table:
+                if date_match:
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
@@ -52,44 +72,44 @@ def parse_kbank_content(pdf_stream):
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
-                        # Logic เช็คฝาก/ถอน เบื้องต้น
-                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอน"])
+                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
                         balance = str_to_float(amounts[-1])
+
+                    remaining = ""
+                    if amounts:
+                        parts = line.split(amounts[-1])
+                        if len(parts) > 1: remaining = parts[-1].strip()
                     
-                    # ค้นหา Channel หลังยอดคงเหลือ
-                    remaining = line.split(amounts[-1])[-1].strip() if amounts else ""
-                    all_parsed_rows.append([date, time, desc, amount_val, balance, "-", remaining])
-    return all_parsed_rows
+                    chan, det = split_channel_and_detail(remaining)
+                    # format: [วันที่, เวลา, รายการ, ยอดเงิน, ยอดคงเหลือ, ช่องทาง, รายละเอียด]
+                    all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
 
-# ================= 3. Logic สำหรับกรุงไทย (KTB) =================
-def parse_ktb_content(pdf_stream):
-    all_parsed_rows = []
-    with pdfplumber.open(pdf_stream) as pdf:
-        for page in pdf.pages:
-            table = page.extract_table({"vertical_strategy": "lines", "horizontal_strategy": "lines"})
-            if not table: continue
-            for row in table:
-                if row[0] and re.search(r'\d{2}/\d{2}/\d{2}', row[0]):
-                    dt_parts = row[0].split('\n')
-                    date = dt_parts[0].strip()
-                    time = dt_parts[1].strip() if len(dt_parts) > 1 else ""
-                    desc = row[1].replace('\n', ' ').strip() if row[1] else ""
-                    detail = row[2].replace('\n', ' ').strip() if row[2] else ""
-                    withdraw = str_to_float(row[3])
-                    deposit = str_to_float(row[4])
-                    balance = str_to_float(row[5])
-                    branch = row[6].strip() if row[6] else ""
-                    amount_val = deposit if deposit > 0 else -withdraw
-                    all_parsed_rows.append([date, time, desc, amount_val, balance, f"Branch: {branch}", detail])
-    return all_parsed_rows
+                elif is_in_table:
+                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
+                    c_extra, d_extra = split_channel_and_detail(line)
+                    all_parsed_rows.append(["", "", "", 0.0, 0.0, c_extra if c_extra != "-" else "", d_extra])
 
-# ================= 4. Logic สำหรับไทยพาณิชย์ (SCB) - ปรับปรุงแก้ไขบรรทัดเพี้ยน =================
-def parse_scb_content(pdf_stream):
+    # กรองเอาเฉพาะบรรทัดที่มีข้อมูล (Logic เดิมของ KBank)
+    final_rows = [row for row in all_parsed_rows if row[3] != 0 or row[4] != 0 or row[2] != ""]
+    return final_rows
+
+# ================= 3. Logic สำหรับไทยพาณิชย์ (SCB) =================
+def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = ["Date/Time", "Code", "Channel", "Description", "Balance", "หน้าที่", "Page", "เอกสารฉบับนี้"]
+    ignore_keywords = [
+        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
+        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
+        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
+        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
+        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
+        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
+        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
+    ]
+    
+    pending_desc = "" 
 
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
@@ -98,63 +118,72 @@ def parse_scb_content(pdf_stream):
             lines = text.split('\n')
             for line in lines:
                 line = line.strip()
-                if not line or any(kw in line for kw in ignore_keywords): continue
+                if not line: continue
 
-                # ตรวจสอบยอดยกมา
                 if any(kw in line.upper() for kw in bf_keywords):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
-                        all_parsed_rows.append([None, None, "B/F", 0.0, str_to_float(amounts[-1]), "-", "ยอดยกมา"])
+                        balance = str_to_float(amounts[-1])
+                        all_parsed_rows.append([None, None, "ยอดยกมา", 0.0, balance, "-", "BALANCE BROUGHT FORWARD"])
                     continue
 
-                # ตรวจสอบรายการหลัก (วันที่ เวลา)
-                transaction_match = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                if any(kw in line for kw in ignore_keywords):
+                    if "Balance Carried Forward" in line: pending_desc = ""
+                    continue
+
+                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 if transaction_match:
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     
-                    # หา Code ธุรกรรม
-                    temp_after_time = line.split(time_str)[-1].strip()
-                    code = temp_after_time.split()[0] if temp_after_time else "-"
+                    temp_text = line.replace(date_str, "").replace(time_str, "").strip()
+                    parts = temp_text.split()
+                    code = parts[0] if len(parts) > 0 else "-"
                     
-                    amount_val, balance_val = 0.0, 0.0
-                    line_desc = ""
+                    channel = "-"
+                    if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]):
+                        channel = parts[1]
 
-                    if amounts:
-                        # ป้องกันบรรทัดเพี้ยน: ตัดเอาแค่ข้อความ "ก่อน" ถึงตัวเลขจำนวนเงินตัวแรก
-                        first_amt_str = amounts[0]
-                        pos_amt = line.find(first_amt_str)
-                        pos_code = line.find(code) + len(code)
-                        line_desc = line[pos_code:pos_amt].strip()
-                        
+                    amount_val = 0.0
+                    balance_val = 0.0
+                    if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
-                        if len(amounts) >= 2:
-                            raw_amt = str_to_float(amounts[-2])
-                            # เช็ค Code ฝาก/ถอน
-                            if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'QR']:
-                                amount_val = raw_amt
-                            else:
-                                amount_val = -raw_amt
+                        raw_amount = str_to_float(amounts[-2])
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR']:
+                            amount_val = raw_amount
+                        else:
+                            amount_val = -raw_amount
+                    elif len(amounts) == 1:
+                        balance_val = str_to_float(amounts[0])
 
-                    channel = "ENET" if "ENET" in line else "-"
-                    line_desc = line_desc.replace("ENET", "").strip()
-                    
-                    all_parsed_rows.append([date_str, time_str, code, amount_val, balance_val, channel, line_desc])
+                    line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
+                    if channel != "-": line_desc = line_desc.replace(channel, "", 1)
+                    for amt in amounts: line_desc = line_desc.replace(amt, "")
+                    line_desc = line_desc.strip()
+
+                    final_desc = (pending_desc + " " + line_desc).strip()
+                    pending_desc = "" 
+                    # format: [วันที่, เวลา, รายการ, ยอดเงิน, ยอดคงเหลือ, ช่องทาง, รายละเอียด]
+                    all_parsed_rows.append([date_str, time_str, code, amount_val, balance_val, channel, final_desc])
                 
-                elif all_parsed_rows and not re.search(r'\.\d{2}', line):
-                    # เก็บรายละเอียดบรรทัดต่อมา (ถ้าไม่มีตัวเลขจำนวนเงินในบรรทัดนั้น)
-                    all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+                elif all_parsed_rows:
+                    if line.startswith(("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม")):
+                        pending_desc = (pending_desc + " " + line).strip()
+                    else:
+                        current_desc = all_parsed_rows[-1][6]
+                        all_parsed_rows[-1][6] = (current_desc + " " + line).strip()
 
     return all_parsed_rows
 
-# ================= 5. ส่วน UI Streamlit =================
-st.title("📑 Bank Statement to Excel")
-st.info("ระบบรองรับการรวมไฟล์ PDF สูงสุด 5 ไฟล์ (ธนาคารเดียวกัน)")
+# ================= 4. ส่วนการแสดงผล UI =================
+
+st.title("📑 Bank Statement to Excel Converter")
+st.info("รองรับ KBank และ SCB อัปโหลดได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกัน")
 
 with st.sidebar:
-    st.header("การตั้งค่า")
-    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)", "กรุงไทย (KTB)", "ไทยพาณิชย์ (SCB)"])
+    st.header("ตั้งค่าการแปลงไฟล์")
+    bank_option = st.selectbox("เลือกรูปแบบธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)"])
     st.divider()
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
@@ -165,11 +194,11 @@ if convert_button:
         if len(pdf_files) > 5:
             st.error("❌ กรุณาเลือกไฟล์ไม่เกิน 5 ไฟล์")
         else:
-            all_dfs = []
+            all_dataframes = []
             try:
                 progress_bar = st.progress(0)
-                for idx, uploaded_file in enumerate(pdf_files):
-                    st.write(f"⏳ กำลังประมวลผล: {uploaded_file.name}")
+                for index, uploaded_file in enumerate(pdf_files):
+                    st.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
                     pdf_bytes = uploaded_file.read()
                     
                     with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
@@ -177,51 +206,50 @@ if convert_button:
                         pdf.save(unlocked_io)
                         unlocked_io.seek(0)
                         
-                        # เลือก Parser ตามธนาคาร
+                        # เลือก Function ตามธนาคาร
                         if bank_option == "กสิกรไทย (KBank)":
-                            rows = parse_kbank_content(unlocked_io)
-                            date_p = '%d-%m-%y'
-                        elif bank_option == "กรุงไทย (KTB)":
-                            rows = parse_ktb_content(unlocked_io)
-                            date_p = '%d/%m/%y'
+                            data_rows = parse_kbank_pdf(unlocked_io)
+                            date_format = '%d-%m-%y'
                         else:
-                            rows = parse_scb_content(unlocked_io)
-                            date_p = '%d/%m/%y'
+                            data_rows = parse_scb_pdf(unlocked_io)
+                            date_format = '%d/%m/%Y' # SCB มักใช้ปี 4 หลัก หรือตาม Regex
                         
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ยอดเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce').dt.date
-                        all_dfs.append(df)
+                        header = ["วันที่", "เวลา", "รายการ", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
+                        df_single = pd.DataFrame(data_rows, columns=header)
+                        
+                        # พยายามแปลงวันที่ให้เป็น datetime เพื่อความสวยงามใน Excel
+                        df_single['วันที่'] = pd.to_datetime(df_single['วันที่'], dayfirst=True, errors='coerce')
+                        all_dataframes.append(df_single)
                     
-                    progress_bar.progress((idx + 1) / len(pdf_files))
+                    progress_bar.progress((index + 1) / len(pdf_files))
 
-                if all_dfs:
-                    final_df = pd.concat(all_dfs, ignore_index=True)
+                if all_dataframes:
+                    final_df = pd.concat(all_dataframes, ignore_index=True)
+                    
                     output = io.BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        # กำหนดรูปแบบวันที่ใน Excel
                         final_df.to_excel(writer, index=False, sheet_name='Statement')
                         workbook = writer.book
                         worksheet = writer.sheets['Statement']
                         
-                        # Format ตัวเลขและวันที่
-                        num_fmt = workbook.add_format({'num_format': '#,##0.00', 'border': 1})
-                        date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'border': 1})
-                        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
+                        # Accounting format (ตัวเลขมีคอมม่า ยอดลบมีวงเล็บ)
+                        num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                        date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy'})
 
-                        for col_num, value in enumerate(final_df.columns.values):
-                            worksheet.write(0, col_num, value, header_fmt)
-                        
                         worksheet.set_column('A:A', 12, date_fmt)
-                        worksheet.set_column('B:C', 10)
-                        worksheet.set_column('D:E', 18, num_fmt)
+                        worksheet.set_column('B:C', 12)
+                        worksheet.set_column('D:E', 20, num_fmt)
                         worksheet.set_column('F:F', 15)
                         worksheet.set_column('G:G', 60)
                     
-                    st.success("✅ แปลงไฟล์และรวมข้อมูลสำเร็จ!")
+                    output.seek(0)
+                    st.success(f"✅ แปลงไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
                     st.dataframe(final_df, use_container_width=True)
                     st.download_button(
                         label="📥 ดาวน์โหลดไฟล์ Excel รวม", 
-                        data=output.getvalue(), 
-                        file_name=f"Combined_Statement_{bank_option.split(' ')[0]}.xlsx",
+                        data=output, 
+                        file_name=f"Combined_{bank_option.split(' ')[0]}_Statement.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
             except PasswordError:
@@ -229,4 +257,4 @@ if convert_button:
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
     else:
-        st.warning("⚠️ กรุณาอัปโหลดไฟล์ PDF")
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF")
