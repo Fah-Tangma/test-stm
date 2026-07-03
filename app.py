@@ -249,5 +249,3 @@ if convert_button:
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
 
- else:
-        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์")
