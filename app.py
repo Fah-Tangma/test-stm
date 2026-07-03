@@ -196,20 +196,33 @@ def parse_scb_pdf(pdf_stream):
 
 st.title("📑 PDF Statement to Excel")
 
+# ใช้ Placeholder สำหรับ Info เพื่อให้สั่งลบได้ในภายหลังถ้าต้องการ
+info_placeholder = st.empty()
+info_placeholder.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
+
 with st.sidebar:
     st.header("ตัวเลือก")
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
-    convert_button = st.button("ประมวลผลไฟล์ทั้งหมด")
+    convert_button = st.button("เริ่มการแปลงไฟล์ทั้งหมด")
 
 if convert_button:
     if not pdf_files:
         st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
+        # --- สร้าง Placeholder สำหรับ แถบสถานะต่างๆ ---
+        status_placeholder = st.empty()   # สำหรับ "กำลังประมวลผล..."
+        progress_placeholder = st.empty() # สำหรับ Progress Bar
+        success_placeholder = st.empty()  # สำหรับ แถบสีเขียว
+        
         all_dfs = []
         try:
-            for uploaded_file in pdf_files:
+            for i, uploaded_file in enumerate(pdf_files):
+                # แสดงสถานะปัจจุบัน
+                status_placeholder.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
+                progress_placeholder.progress((i + 1) / len(pdf_files))
+                
                 pdf_bytes = uploaded_file.read()
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
@@ -226,77 +239,61 @@ if convert_button:
                         cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                    
                     all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
+
+                # --- เคลียร์แถบสถานะทิ้ง (ให้หายไปจากหน้าจอ) ---
+                status_placeholder.empty()
+                progress_placeholder.empty()
+                # info_placeholder.empty() # ถ้าต้องการให้ Info ด้านบนหายไปด้วย ให้เอาคอมเม้นต์ออก
                 
-                # แสดงผลในหน้าเว็บ
+                # แสดงตารางผลลัพธ์
                 st.dataframe(final_df, use_container_width=True)
 
+                # สร้าง Excel
                 output = io.BytesIO()
-                # --- จุดสำคัญ: เพิ่ม datetime_format='m/d/yyyy' ใน ExcelWriter ---
                 with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     sheet_name = 'Statement'
                     final_df.to_excel(writer, index=False, sheet_name=sheet_name)
                     workbook = writer.book
                     worksheet = writer.sheets[sheet_name]
 
-                    # ตั้งค่าพื้นฐาน (ไม่มีเส้นขอบ)
                     is_scb = (bank_option == "ไทยพาณิชย์ (SCB)")
-                    border_val = 0 
                     header_color = '#4E2E7F' if is_scb else '#00A950'
                     num_cols_range = 'E:F' if is_scb else 'D:E'
 
-                    # 1. Format สำหรับหัวตาราง
-                    header_fmt = workbook.add_format({
-                        'bold': True, 'bg_color': header_color, 'font_color': 'white', 
-                        'border': border_val, 'align': 'center', 'valign': 'vcenter'
-                    })
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'border': 0, 'align': 'center', 'valign': 'vcenter'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left', 'border': 0, 'valign': 'vcenter'})
+                    text_fmt = workbook.add_format({'border': 0, 'valign': 'vcenter'})
 
-                    # 2. Format สำหรับตัวเลข (Accounting)
-                    num_fmt = workbook.add_format({
-                        'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
-                        'align': 'right',
-                        'border': border_val,
-                        'valign': 'vcenter'
-                    })
-
-                    # 3. Format สำหรับวันที่ (m/d/yyyy) - บังคับ Format อีกครั้งที่คอลัมน์ A
-                    date_fmt = workbook.add_format({
-                        'num_format': 'm/d/yyyy', 
-                        'align': 'left',
-                        'border': border_val,
-                        'valign': 'vcenter'
-                    })
-
-                    # 4. Format สำหรับข้อความทั่วไป
-                    text_fmt = workbook.add_format({
-                        'border': border_val, 
-                        'valign': 'vcenter'
-                    })
-
-                    # เขียน Header
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
 
-                    # --- ประยุกต์ใช้ Format และกำหนดความกว้างคอลัมน์ ---
-                    worksheet.set_column('A:A', 15, date_fmt)       # บังคับคอลัมน์ A เป็น m/d/yyyy
+                    worksheet.set_column('A:A', 15, date_fmt)
                     worksheet.set_column('B:D', 10, text_fmt)
                     worksheet.set_column(num_cols_range, 20, num_fmt)
                     worksheet.set_column('G:G', 80, text_fmt)
 
                 output.seek(0)
                 st.download_button(
-                    label=f"📥 ดาวน์โหลด Excel ({bank_option})",
+                    label=f"📥 ดาวน์โหลดไฟล์ Excel ({bank_option})",
                     data=output,
-                    file_name=f"Statement_{bank_option.split(' ')[0]}.xlsx",
+                    file_name=f"Combined_Statement.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+                
+                # แสดงความสำเร็จแวบเดียว หรือไม่แสดงเลยตามใจคนใช้
+                # success_placeholder.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
 
         except PasswordError:
+            status_placeholder.empty()
+            progress_placeholder.empty()
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
         except Exception as e:
+            status_placeholder.empty()
+            progress_placeholder.empty()
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
 
