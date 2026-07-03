@@ -174,25 +174,26 @@ if convert_button:
                         rows = parse_scb_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
-                        # ใช้ dayfirst=True สำหรับ format dd/mm/yyyy ของ SCB เพื่อแปลงเป็น datetime object
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     
                     all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
+                
+                # แสดงผลในหน้าเว็บ
                 st.dataframe(final_df, use_container_width=True)
 
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # --- จุดสำคัญ: เพิ่ม datetime_format='m/d/yyyy' ใน ExcelWriter ---
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     sheet_name = 'Statement'
                     final_df.to_excel(writer, index=False, sheet_name=sheet_name)
                     workbook = writer.book
                     worksheet = writer.sheets[sheet_name]
 
-                    # ตั้งค่าตัวแปร
+                    # ตั้งค่าพื้นฐาน (ไม่มีเส้นขอบ)
                     is_scb = (bank_option == "ไทยพาณิชย์ (SCB)")
-                    # *** ปรับเป็น 0 ทั้งคู่ตามที่ขอ (ไม่เอาเส้นขอบ) ***
                     border_val = 0 
                     header_color = '#4E2E7F' if is_scb else '#00A950'
                     num_cols_range = 'E:F' if is_scb else 'D:E'
@@ -211,7 +212,7 @@ if convert_button:
                         'valign': 'vcenter'
                     })
 
-                    # 3. Format สำหรับวันที่ (m/d/yyyy) *** ใช้เหมือนกันทั้งคู่ ***
+                    # 3. Format สำหรับวันที่ (m/d/yyyy) - บังคับ Format อีกครั้งที่คอลัมน์ A
                     date_fmt = workbook.add_format({
                         'num_format': 'm/d/yyyy', 
                         'align': 'left',
@@ -229,9 +230,9 @@ if convert_button:
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
 
-                    # ประยุกต์ใช้ Format
-                    worksheet.set_column('A:A', 15, date_fmt)       # คอลัมน์วันที่ (ใช้ m/d/yyyy ทั้งคู่)
-                    worksheet.set_column('B:D', 12, text_fmt)
+                    # --- ประยุกต์ใช้ Format และกำหนดความกว้างคอลัมน์ ---
+                    worksheet.set_column('A:A', 15, date_fmt)       # บังคับคอลัมน์ A เป็น m/d/yyyy
+                    worksheet.set_column('B:D', 10, text_fmt)
                     worksheet.set_column(num_cols_range, 20, num_fmt)
                     worksheet.set_column('G:G', 80, text_fmt)
 
@@ -247,3 +248,6 @@ if convert_button:
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+
+ else:
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF อย่างน้อย 1 ไฟล์")
