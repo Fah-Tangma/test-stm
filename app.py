@@ -115,76 +115,82 @@ def parse_ktb_content(pdf_stream):
 def parse_scb_content(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
+    # เพิ่มคำที่ควรข้ามเพื่อไม่ให้มันไปเก็บสะสมใน 'รายละเอียด'
     ignore_keywords = [
-        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
-        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
-        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด", "หน้าที่ (Page)", 
-        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
-        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "TOTAL ITEMS"
+        "Date/Time", "Code", "Channel", "Description", "Balance", "หน้าที่", "Page",
+        "รวมรายการ", "Total Items", "สอบถามข้อมูล", "02-777-7777", "เอกสารฉบับนี้"
     ]
-    
-    pending_desc = "" 
 
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
+            
             lines = text.split('\n')
             for line in lines:
                 line = line.strip()
-                if not line: continue
+                if not line or any(kw in line for kw in ignore_keywords): continue
 
-                # ตรวจสอบยอดยกมา
+                # 1. ตรวจสอบยอดยกมา
                 if any(kw in line.upper() for kw in bf_keywords):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
-                        balance = str_to_float(amounts[-1])
-                        all_parsed_rows.append([None, None, "B/F", 0.0, balance, "-", "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
+                        all_parsed_rows.append([None, None, "B/F", 0.0, str_to_float(amounts[-1]), "-", "ยอดยกมา"])
                     continue
 
-                if any(kw in line for kw in ignore_keywords):
-                    if "Balance Carried Forward" in line: pending_desc = ""
-                    continue
-
-                # ตรวจสอบบรรทัดรายการหลัก
-                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                # 2. ตรวจสอบบรรทัดรายการหลัก (วันที่ เวลา รหัส ยอดเงิน ยอดคงเหลือ)
+                # ใช้ Regex ที่ยืดหยุ่นขึ้นเพื่อตรวจจับ Date และ Time
+                transaction_match = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                
                 if transaction_match:
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
+                    
+                    # ค้นหาตัวเลขทั้งหมด (ยอดเงิน และ ยอดคงเหลือ)
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     
+                    # แยกข้อความที่เหลือ
                     temp_text = line.replace(date_str, "").replace(time_str, "").strip()
                     parts = temp_text.split()
                     code = parts[0] if len(parts) > 0 else "-"
                     
-                    channel = "-"
-                    if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]):
-                        channel = parts[1]
-
                     amount_val = 0.0
                     balance_val = 0.0
+                    
+                    # ปกติ SCB รายการหลักต้องมีตัวเลขอย่างน้อย 1-2 ชุด (ยอดเงิน และ ยอดคงเหลือ)
                     if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
                         raw_amount = str_to_float(amounts[-2])
-                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR']:
+                        # เช็ค Code ว่าเป็นเงินเข้า (บวก) หรือ เงินออก (ลบ)
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'QR']:
                             amount_val = raw_amount
                         else:
                             amount_val = -raw_amount
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
 
-                    line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
-                    if channel != "-": line_desc = line_desc.replace(channel, "", 1)
-                    for amt in amounts: line_desc = line_desc.replace(amt, "")
+                    # --- จุดที่แก้: ตัดเอาเฉพาะรายละเอียดที่อยู่ 'ก่อน' ยอดเงินตัวแรก ---
+                    # เพื่อป้องกันไม่ให้ 'รับโอนจาก...' ของบรรทัดถัดไปที่ติดมา ถูกดึงมาด้วย
+                    line_desc = ""
+                    if amounts:
+                        # หาตำแหน่งของยอดเงินตัวแรกในบรรทัด แล้วตัดข้อความแค่ก่อนถึงตรงนั้น
+                        first_amt_pos = line.find(amounts[0])
+                        # หาตำแหน่งหลัง Code/Channel
+                        start_pos = line.find(code) + len(code)
+                        line_desc = line[start_pos:first_amt_pos].strip()
                     
-                    all_parsed_rows.append([date_str, time_str, code, amount_val, balance_val, channel, line_desc.strip()])
+                    # ทำความสะอาดรายละเอียด (ลบ Channel ถ้าซ้ำซ้อน)
+                    channel = "ENET" if "ENET" in line else "-"
+                    line_desc = line_desc.replace("ENET", "").strip()
+
+                    all_parsed_rows.append([date_str, time_str, code, amount_val, balance_val, channel, line_desc])
                 
                 elif all_parsed_rows:
-                    # เก็บตกรายละเอียดบรรทัดถัดไป
-                    if line.startswith(("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม")):
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
-                    else:
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+                    # 3. ถ้าเป็นบรรทัดรายละเอียดที่ไม่มีวันที่ ให้เอาไปต่อท้ายรายการล่าสุด
+                    # แต่ต้องไม่ใช่บรรทัดที่มีจำนวนเงิน (เพื่อป้องกันการรวมข้ามรายการ)
+                    if not re.search(r'\.\d{2}', line):
+                        current_desc = all_parsed_rows[-1][6]
+                        all_parsed_rows[-1][6] = (current_desc + " " + line).strip()
 
     return all_parsed_rows
 
