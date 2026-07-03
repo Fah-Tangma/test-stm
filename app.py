@@ -19,7 +19,7 @@ def str_to_float(val_str):
         return 0.0
 
 # ================= 2. Logic สำหรับ KBank =================
-def split_channel_and_detail_kbank(text):
+def split_channel_and_detail(text):
     channels = [
         "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
         "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
@@ -34,33 +34,50 @@ def split_channel_and_detail_kbank(text):
             break
     return found_channel, detail_part
 
-def parse_kbank_pdf(pdf_stream):
+def str_to_float(val_str):
+    if val_str in [None, "", "-", " "]: return None
+    try: return float(str(val_str).replace(',', ''))
+    except: return None
+
+# ================= 2. Logic การอ่าน PDF (คงเดิม) =================
+def parse_pdf_content(pdf_stream):
     all_parsed_rows = []
+    bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
+
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
             text = page.extract_text()
             if not text: continue
             lines = text.split('\n')
             is_in_table = False 
+
             for line in lines:
                 line = line.strip()
+                if not line: continue
+                
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
+                
                 if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
+
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
+                
                 if date_match:
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
+                    
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
+                    
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
-                    amount_val, balance = 0.0, 0.0
+                    
+                    amount_val, balance = None, None
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
@@ -68,17 +85,51 @@ def parse_kbank_pdf(pdf_stream):
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
                         balance = str_to_float(amounts[-1])
+
                     remaining = ""
                     if amounts:
                         parts = line.split(amounts[-1])
                         if len(parts) > 1: remaining = parts[-1].strip()
-                    chan, det = split_channel_and_detail_kbank(remaining)
+                    
+                    chan, det = split_channel_and_detail(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
+
                 elif is_in_table:
                     if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                    c_extra, d_extra = split_channel_and_detail_kbank(line)
+                    c_extra, d_extra = split_channel_and_detail(line)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
-    return all_parsed_rows
+
+    # --- กรองข้อมูลตามเงื่อนไข ---
+    temp_list_bf = []
+    found_first_bf = False
+    for row in all_parsed_rows:
+        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
+        if is_bf_row:
+            if not found_first_bf:
+                temp_list_bf.append(row)
+                found_first_bf = True
+        else:
+            temp_list_bf.append(row)
+
+    final_filtered_rows = []
+    i, n = 0, len(temp_list_bf)
+    while i < n:
+        if temp_list_bf[i][3] is not None:
+            final_filtered_rows.append(temp_list_bf[i])
+            i += 1
+        else:
+            empty_block = []
+            while i < n and temp_list_bf[i][3] is None:
+                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
+                    final_filtered_rows.append(temp_list_bf[i])
+                    i += 1
+                    continue
+                empty_block.append(temp_list_bf[i])
+                i += 1
+            if len(empty_block) == 1:
+                final_filtered_rows.append(empty_block[0])
+            
+    return final_filtered_rows
 
 # ================= 3. Logic สำหรับ SCB =================
 def parse_scb_pdf(pdf_stream):
