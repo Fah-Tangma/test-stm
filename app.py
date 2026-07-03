@@ -9,7 +9,7 @@ from pikepdf import PasswordError
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
-# ================= 1. ฟังก์ชันช่วยเหลือ (Common) =================
+# ================= 1. ฟังก์ชันช่วยเหลือ (Common Helpers) =================
 def str_to_float(val_str):
     if val_str in [None, "", "-", " "]: return 0.0
     try:
@@ -84,15 +84,8 @@ def parse_kbank_pdf(pdf_stream):
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = [
-        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
-        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
-        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
-        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
-        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
-        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
-    ]
+    ignore_keywords = ["Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description", 
+                       "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount", "หน้าที่ (Page)"]
     pending_desc = ""
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
@@ -141,29 +134,24 @@ def parse_scb_pdf(pdf_stream):
                         all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
     return all_parsed_rows
 
-# ================= 4. ส่วนการแสดงผล (Streamlit UI) =================
+# ================= 4. Streamlit UI & Excel Export =================
 
-st.title("📑 PDF Statement to Excel")
-st.info("รวมไฟล์ PDF ได้สูงสุด 5 ไฟล์ (KBank หรือ SCB)")
+st.title("📑 PDF Statement to Excel (No Borders)")
 
 with st.sidebar:
-    st.header("ตัวเลือกธนาคาร")
+    st.header("ตัวเลือก")
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)"])
-    pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
+    pdf_files = st.file_uploader("เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
     convert_button = st.button("ประมวลผลไฟล์ทั้งหมด")
 
 if convert_button:
     if not pdf_files:
-        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF")
-    elif len(pdf_files) > 5:
-        st.error("❌ ไม่สามารถเลือกเกิน 5 ไฟล์ได้")
+        st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
         all_dfs = []
         try:
-            progress_bar = st.progress(0)
-            for i, uploaded_file in enumerate(pdf_files):
-                st.write(f"⌛ กำลังอ่าน: {uploaded_file.name}")
+            for uploaded_file in pdf_files:
                 pdf_bytes = uploaded_file.read()
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
@@ -174,16 +162,16 @@ if convert_button:
                         rows = parse_kbank_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
-                    else:  # SCB
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
+                    else:
                         rows = parse_scb_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     all_dfs.append(df)
-                progress_bar.progress((i + 1) / len(pdf_files))
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
-                st.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
                 st.dataframe(final_df, use_container_width=True)
 
                 # --- จัดการ Excel Formatting ---
@@ -194,47 +182,58 @@ if convert_button:
                     workbook = writer.book
                     worksheet = writer.sheets[sheet_name]
 
-                    # กำหนด Style ตามเงื่อนไขธนาคาร
-                    if bank_option == "กสิกรไทย (KBank)":
-                        header_color = '#00A950'  # เขียว KBank
-                        border_val = 1             # มีเส้น
-                        num_cols_range = 'D:E'
-                    else:
-                        header_color = '#4E2E7F'  # ม่วง SCB
-                        border_val = 0             # ***ไม่เอาเส้น***
-                        num_cols_range = 'E:F'
+                    # กำหนดสีและช่วงคอลัมน์ (ทั้งคู่ไม่มีเส้นขอบ border=0)
+                    is_scb = (bank_option == "ไทยพาณิชย์ (SCB)")
+                    header_color = '#4E2E7F' if is_scb else '#00A950'
+                    num_cols_range = 'E:F' if is_scb else 'D:E'
 
-                    # สร้าง Format
+                    # 1. Format สำหรับหัวตาราง (ไม่เอาเส้น)
                     header_fmt = workbook.add_format({
                         'bold': True, 'bg_color': header_color, 'font_color': 'white', 
-                        'border': border_val, 'align': 'center', 'valign': 'vcenter'
-                    })
-                    num_fmt = workbook.add_format({
-                        'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 
-                        'border': border_val, 'valign': 'vcenter'
-                    })
-                    text_fmt = workbook.add_format({
-                        'border': border_val, 'valign': 'vcenter'
+                        'border': 0, 'align': 'center', 'valign': 'vcenter'
                     })
 
-                    # เขียน Header ใหม่ทับด้วย Format ที่กำหนด
+                    # 2. Format สำหรับตัวเลข (Accounting) ตามโจทย์ (ไม่เอาเส้น)
+                    num_fmt = workbook.add_format({
+                        'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
+                        'align': 'right',
+                        'border': 0,
+                        'valign': 'vcenter'
+                    })
+
+                    # 3. Format สำหรับวันที่ (m/d/yyyy) ตามโจทย์ (ไม่เอาเส้น)
+                    date_fmt = workbook.add_format({
+                        'num_format': 'm/d/yyyy', 
+                        'align': 'left',
+                        'border': 0,
+                        'valign': 'vcenter'
+                    })
+
+                    # 4. Format สำหรับข้อความทั่วไป (ไม่เอาเส้น)
+                    text_fmt = workbook.add_format({
+                        'border': 0, 
+                        'valign': 'vcenter'
+                    })
+
+                    # เขียน Header ทับพร้อม Format
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
-                    
-                    # ตั้งค่าความกว้างและ Format ของคอลัมน์
-                    worksheet.set_column('A:A', 12, text_fmt)
-                    worksheet.set_column('B:D', 10, text_fmt)
-                    worksheet.set_column(num_cols_range, 20, num_fmt)
-                    worksheet.set_column('G:G', 80, text_fmt)
+
+                    # ประยุกต์ใช้ Format กับคอลัมน์ต่างๆ
+                    worksheet.set_column('A:A', 15, date_fmt)       # วันที่
+                    worksheet.set_column('B:D', 12, text_fmt)       # ทั่วไป
+                    worksheet.set_column(num_cols_range, 20, num_fmt) # ตัวเลข
+                    worksheet.set_column('G:G', 80, text_fmt)       # รายละเอียด
 
                 output.seek(0)
                 st.download_button(
-                    label=f"📥 ดาวน์โหลดไฟล์ Excel ({bank_option})",
+                    label=f"📥 ดาวน์โหลด Excel ({bank_option})",
                     data=output,
-                    file_name=f"Combined_Statement_{bank_option.split(' ')[0]}.xlsx",
+                    file_name=f"Statement_{bank_option.split(' ')[0]}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
         except PasswordError:
-            st.error("❌ รหัสผ่านไฟล์ PDF ไม่ถูกต้อง")
+            st.error("❌ รหัสผ่านไม่ถูกต้อง")
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
