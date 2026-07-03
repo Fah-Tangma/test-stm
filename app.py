@@ -84,8 +84,15 @@ def parse_kbank_pdf(pdf_stream):
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = ["Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description", 
-                       "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount", "หน้าที่ (Page)"]
+    ignore_keywords = [
+        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
+        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
+        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
+        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
+        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
+        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
+        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
+    ]
     pending_desc = ""
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
@@ -162,13 +169,12 @@ if convert_button:
                         rows = parse_kbank_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
-                        # แปลงวันที่ KBank (dd-mm-yy)
                         df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
                     else:
                         rows = parse_scb_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
-                        # แปลงวันที่ SCB (dd/mm/yyyy)
+                        # ใช้ dayfirst=True สำหรับ format dd/mm/yyyy ของ SCB เพื่อแปลงเป็น datetime object
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     
                     all_dfs.append(df)
@@ -177,7 +183,6 @@ if convert_button:
                 final_df = pd.concat(all_dfs, ignore_index=True)
                 st.dataframe(final_df, use_container_width=True)
 
-                # --- จัดการ Excel ---
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     sheet_name = 'Statement'
@@ -185,9 +190,10 @@ if convert_button:
                     workbook = writer.book
                     worksheet = writer.sheets[sheet_name]
 
-                    # ตั้งค่าตัวแปรตามเงื่อนไข SCB ไม่เอาเส้น / KBank เอาเส้น
+                    # ตั้งค่าตัวแปร
                     is_scb = (bank_option == "ไทยพาณิชย์ (SCB)")
-                    border_val = 0 if is_scb else 1
+                    # *** ปรับเป็น 0 ทั้งคู่ตามที่ขอ (ไม่เอาเส้นขอบ) ***
+                    border_val = 0 
                     header_color = '#4E2E7F' if is_scb else '#00A950'
                     num_cols_range = 'E:F' if is_scb else 'D:E'
 
@@ -197,7 +203,7 @@ if convert_button:
                         'border': border_val, 'align': 'center', 'valign': 'vcenter'
                     })
 
-                    # 2. Format สำหรับตัวเลข (Accounting) ตามที่คุณกำหนด
+                    # 2. Format สำหรับตัวเลข (Accounting)
                     num_fmt = workbook.add_format({
                         'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)',
                         'align': 'right',
@@ -205,7 +211,7 @@ if convert_button:
                         'valign': 'vcenter'
                     })
 
-                    # 3. Format สำหรับวันที่ (m/d/yyyy) ตามที่คุณกำหนด
+                    # 3. Format สำหรับวันที่ (m/d/yyyy) *** ใช้เหมือนกันทั้งคู่ ***
                     date_fmt = workbook.add_format({
                         'num_format': 'm/d/yyyy', 
                         'align': 'left',
@@ -219,15 +225,15 @@ if convert_button:
                         'valign': 'vcenter'
                     })
 
-                    # เขียน Header ทับพร้อม Format
+                    # เขียน Header
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
 
-                    # ประยุกต์ใช้ Format กับคอลัมน์ต่างๆ
-                    worksheet.set_column('A:A', 15, date_fmt)       # คอลัมน์วันที่
-                    worksheet.set_column('B:D', 12, text_fmt)       # คอลัมน์ทั่วไป
-                    worksheet.set_column(num_cols_range, 20, num_fmt) # คอลัมน์ตัวเลข
-                    worksheet.set_column('G:G', 80, text_fmt)       # คอลัมน์รายละเอียด
+                    # ประยุกต์ใช้ Format
+                    worksheet.set_column('A:A', 15, date_fmt)       # คอลัมน์วันที่ (ใช้ m/d/yyyy ทั้งคู่)
+                    worksheet.set_column('B:D', 12, text_fmt)
+                    worksheet.set_column(num_cols_range, 20, num_fmt)
+                    worksheet.set_column('G:G', 80, text_fmt)
 
                 output.seek(0)
                 st.download_button(
