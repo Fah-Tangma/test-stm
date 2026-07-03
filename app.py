@@ -40,7 +40,7 @@ def str_to_float(val_str):
     except: return None
 
 # ================= 2. Logic การอ่าน PDF (คงเดิม) =================
-def parse_pdf_content(pdf_stream):
+def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
