@@ -9,11 +9,10 @@ from pikepdf import PasswordError
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
-# ================= 1. ฟังก์ชันส่วนกลาง (Common Helpers) =================
+# ================= 1. ฟังก์ชันช่วยเหลือ (Common) =================
 def str_to_float(val_str):
     if val_str in [None, "", "-", " "]: return 0.0
     try:
-        # ลบ comma และช่องว่างออก
         clean_val = re.sub(r'[^\d.-]', '', str(val_str))
         return float(clean_val)
     except:
@@ -37,37 +36,30 @@ def split_channel_and_detail_kbank(text):
 
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
-    bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
     table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ"]
-
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
             text = page.extract_text()
             if not text: continue
             lines = text.split('\n')
             is_in_table = False 
-
             for line in lines:
                 line = line.strip()
-                if not line or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
-                    is_in_table = False
-                    continue
-                
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
-
+                if not is_in_table or any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
+                    is_in_table = False
+                    continue
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
                 if date_match:
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                    
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
-                    
                     amount_val, balance = 0.0, 0.0
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
@@ -76,12 +68,10 @@ def parse_kbank_pdf(pdf_stream):
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
                         balance = str_to_float(amounts[-1])
-
                     remaining = ""
                     if amounts:
                         parts = line.split(amounts[-1])
                         if len(parts) > 1: remaining = parts[-1].strip()
-                    
                     chan, det = split_channel_and_detail_kbank(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
                 elif is_in_table:
@@ -103,7 +93,6 @@ def parse_scb_pdf(pdf_stream):
         "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
         "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
     ]
-    
     pending_desc = ""
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
@@ -113,16 +102,13 @@ def parse_scb_pdf(pdf_stream):
             for line in lines:
                 line = line.strip()
                 if not line: continue
-
                 if any(kw in line.upper() for kw in bf_keywords):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
                         balance = str_to_float(amounts[-1])
                         all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
                     continue
-
                 if any(kw in line for kw in ignore_keywords): continue
-
                 transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 if transaction_match:
                     date_str = transaction_match.group(1)
@@ -132,7 +118,6 @@ def parse_scb_pdf(pdf_stream):
                     parts = temp_text.split()
                     code = parts[0] if len(parts) > 0 else "-"
                     channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
-
                     amount_val, balance_val = 0.0, 0.0
                     if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
@@ -143,11 +128,9 @@ def parse_scb_pdf(pdf_stream):
                             amount_val = -raw_amount
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
-
                     line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
                     if channel != "-": line_desc = line_desc.replace(channel, "", 1)
                     for amt in amounts: line_desc = line_desc.replace(amt, "")
-                    
                     final_desc = (pending_desc + " " + line_desc.strip()).strip()
                     pending_desc = ""
                     all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, final_desc])
@@ -158,33 +141,30 @@ def parse_scb_pdf(pdf_stream):
                         all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
     return all_parsed_rows
 
-# ================= 4. UI ส่วนแสดงผล =================
+# ================= 4. ส่วนการแสดงผล (Streamlit UI) =================
 
 st.title("📑 PDF Statement to Excel")
-st.markdown("รองรับการรวมไฟล์ PDF สูงสุด 5 ไฟล์ (KBank หรือ SCB)")
+st.info("รวมไฟล์ PDF ได้สูงสุด 5 ไฟล์ (KBank หรือ SCB)")
 
 with st.sidebar:
-    st.header("การตั้งค่า")
+    st.header("ตัวเลือกธนาคาร")
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
-    password = st.text_input("รหัสผ่านไฟล์ PDF (ถ้ามี)", type="password")
-    convert_button = st.button("เริ่มการแปลงไฟล์")
+    password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
+    convert_button = st.button("ประมวลผลไฟล์ทั้งหมด")
 
 if convert_button:
     if not pdf_files:
-        st.error("⚠️ กรุณาเลือกไฟล์ PDF")
+        st.sidebar.warning("⚠️ กรุณาเลือกไฟล์ PDF")
     elif len(pdf_files) > 5:
-        st.error("❌ กรุณาเลือกไม่เกิน 5 ไฟล์")
+        st.error("❌ ไม่สามารถเลือกเกิน 5 ไฟล์ได้")
     else:
         all_dfs = []
-        progress_bar = st.progress(0)
-        
         try:
+            progress_bar = st.progress(0)
             for i, uploaded_file in enumerate(pdf_files):
-                st.write(f"⌛ กำลังอ่านไฟล์: {uploaded_file.name}")
+                st.write(f"⌛ กำลังอ่าน: {uploaded_file.name}")
                 pdf_bytes = uploaded_file.read()
-                
-                # ปลดล็อค PDF
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
                     pdf.save(unlocked_io)
@@ -198,57 +178,63 @@ if convert_button:
                         rows = parse_scb_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ยอดเงิน (ฝาก/ถอน)", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
-                    
                     all_dfs.append(df)
                 progress_bar.progress((i + 1) / len(pdf_files))
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
-                st.success(f"✅ ประมวลผลสำเร็จ {len(pdf_files)} ไฟล์")
+                st.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
                 st.dataframe(final_df, use_container_width=True)
 
-                # สร้างไฟล์ Excel
+                # --- จัดการ Excel Formatting ---
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     sheet_name = 'Statement'
                     final_df.to_excel(writer, index=False, sheet_name=sheet_name)
-                    
                     workbook = writer.book
                     worksheet = writer.sheets[sheet_name]
-                    
-                    # รูปแบบฟอร์แมตตามธนาคาร
+
+                    # กำหนด Style ตามเงื่อนไขธนาคาร
                     if bank_option == "กสิกรไทย (KBank)":
-                        header_color = '#00A950' # สีเขียวกสิกร
-                        num_cols = 'D:E'
-                        desc_col = 'G:G'
+                        header_color = '#00A950'  # เขียว KBank
+                        border_val = 1             # มีเส้น
+                        num_cols_range = 'D:E'
                     else:
-                        header_color = '#4E2E7F' # สีม่วง SCB
-                        num_cols = 'E:F'
-                        desc_col = 'G:G'
+                        header_color = '#4E2E7F'  # ม่วง SCB
+                        border_val = 0             # ***ไม่เอาเส้น***
+                        num_cols_range = 'E:F'
 
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'border': 1, 'align': 'center'})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'border': 1})
-                    text_fmt = workbook.add_format({'border': 1, 'valign': 'vcenter'})
+                    # สร้าง Format
+                    header_fmt = workbook.add_format({
+                        'bold': True, 'bg_color': header_color, 'font_color': 'white', 
+                        'border': border_val, 'align': 'center', 'valign': 'vcenter'
+                    })
+                    num_fmt = workbook.add_format({
+                        'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 
+                        'border': border_val, 'valign': 'vcenter'
+                    })
+                    text_fmt = workbook.add_format({
+                        'border': border_val, 'valign': 'vcenter'
+                    })
 
-                    # เขียน Header ใหม่
+                    # เขียน Header ใหม่ทับด้วย Format ที่กำหนด
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    # ตั้งค่าความกว้างคอลัมน์ (Common)
+                    # ตั้งค่าความกว้างและ Format ของคอลัมน์
                     worksheet.set_column('A:A', 12, text_fmt)
-                    worksheet.set_column('B:B', 10, text_fmt)
-                    worksheet.set_column(num_cols, 18, num_fmt)
-                    worksheet.set_column(desc_col, 60, text_fmt)
+                    worksheet.set_column('B:D', 10, text_fmt)
+                    worksheet.set_column(num_cols_range, 20, num_fmt)
+                    worksheet.set_column('G:G', 80, text_fmt)
 
                 output.seek(0)
                 st.download_button(
                     label=f"📥 ดาวน์โหลดไฟล์ Excel ({bank_option})",
                     data=output,
-                    file_name=f"{bank_option.split(' ')[0]}_Statement_Combined.xlsx",
+                    file_name=f"Combined_Statement_{bank_option.split(' ')[0]}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
         except PasswordError:
-            st.error("❌ รหัสผ่านไม่ถูกต้อง")
+            st.error("❌ รหัสผ่านไฟล์ PDF ไม่ถูกต้อง")
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
