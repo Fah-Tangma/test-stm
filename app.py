@@ -84,8 +84,15 @@ def parse_kbank_pdf(pdf_stream):
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = ["Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description", 
-                       "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount", "หน้าที่ (Page)"]
+    ignore_keywords = [
+        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
+        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
+        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
+        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
+        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
+        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
+        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
+    ]
     pending_desc = ""
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
