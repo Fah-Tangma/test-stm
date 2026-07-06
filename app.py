@@ -414,7 +414,7 @@ if convert_button:
                             df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
                         elif bank_option == "ไทยพาณิชย์ (SCB)":
                             rows = parse_scb_pdf(unlocked_io)
-                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"])
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         elif bank_option == "กรุงไทย (KTB)":
                             rows = parse_ktb_pdf(unlocked_io)
