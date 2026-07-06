@@ -316,7 +316,7 @@ if convert_button:
                         header_color, num_cols = '#00A950', 'D:E'
                     elif bank_option == "ไทยพาณิชย์ (SCB)":
                         header_color, num_cols = '#4E2E7F', 'E:F'
-                    else bank_option == "กรุงไทย (KTB)":
+                    else: #KTB
                         header_color, num_cols = '#00A1E0', 'E:F'
 
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'align': 'center'})
