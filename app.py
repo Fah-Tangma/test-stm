@@ -274,6 +274,10 @@ if convert_button:
         all_dfs = []
         try:
             for uploaded_file in pdf_files:
+                # แสดงสถานะปัจจุบัน
+                status_placeholder.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
+                progress_placeholder.progress((i + 1) / len(pdf_files))
+                
                 pdf_bytes = uploaded_file.read()
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
