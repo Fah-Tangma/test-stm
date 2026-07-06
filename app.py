@@ -437,7 +437,7 @@ if convert_button:
                     f_color = 'black' if bank_option == "กรุงศรี (BAY)" else 'white'
                     
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
                     
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
