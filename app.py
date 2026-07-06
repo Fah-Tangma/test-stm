@@ -395,6 +395,8 @@ if convert_button:
                     if data_rows:
                         header = ["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"]
                         df = pd.DataFrame(data_rows, columns=header)
+                        # แปลงวันที่จาก AI ให้เป็น Datetime (AI มักส่งมาเป็น dd/mm/yyyy หรือ yyyy-mm-dd)
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         df["ถอนเงิน/ฝากเงิน"] = pd.to_numeric(df["ถอนเงิน/ฝากเงิน"], errors='coerce')
                         df["ยอดคงเหลือ"] = pd.to_numeric(df["ยอดคงเหลือ"], errors='coerce')
                         all_dfs.append(df)
@@ -422,11 +424,14 @@ if convert_button:
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
+                
+                # ตรวจสอบว่าคอลัมน์ "วันที่" เป็น datetime หรือยัง (ถ้ามีแถวว่างให้ลบออกก่อนแสดงผล)
                 st.dataframe(final_df, use_container_width=True)
 
                 # Export Excel
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                # กำหนด datetime_format ใน ExcelWriter เพื่อความชัวร์ชั้นแรก
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     final_df.to_excel(writer, index=False, sheet_name='Statement')
                     workbook = writer.book
                     worksheet = writer.sheets['Statement']
@@ -436,17 +441,27 @@ if convert_button:
                     h_color = colors.get(bank_option, '#333333')
                     f_color = 'black' if bank_option == "กรุงศรี (BAY)" else 'white'
                     
+                    # สร้าง Format ต่างๆ
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
+                    # Format พิเศษสำหรับวันที่ m/d/yyyy
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                     
+                    # เขียน Header พร้อมสี
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    # ปรับความกว้างและฟอร์แมตตัวเลข (ประมาณการคอลัมน์)
-                    worksheet.set_column('A:Z', 15)
-                    if "ถอนเงิน/ฝากเงิน" in final_df.columns:
-                        idx = final_df.columns.get_loc("ถอนเงิน/ฝากเงิน")
-                        worksheet.set_column(idx, idx+1, 15, num_fmt)
+                    # ตั้งค่าความกว้างคอลัมน์ทั้งหมดเบื้องต้น
+                    worksheet.set_column('A:Z', 18)
+                    
+                    # --- บังคับ Format วันที่ (คอลัมน์ A) ---
+                    worksheet.set_column('A:A', 15, date_fmt)
+
+                    # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
+                    # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
+                    for idx, col_name in enumerate(final_df.columns):
+                        if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน"]):
+                            worksheet.set_column(idx, idx, 15, num_fmt)
 
                 output.seek(0)
                 st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, 
