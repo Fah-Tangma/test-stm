@@ -22,8 +22,8 @@ def str_to_float(val_str):
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
-    # ปรับ Header ไม่ให้ทับซ้อนกับชื่อรายการ
-    table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ"]
+    # ปรับ Header ให้เจาะจงเพื่อไม่ให้ทับซ้อนกับชื่อรายการธุรกรรม
+    table_headers = ["เวลา/", "วันที่มีผล", "รายการ", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ"]
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
@@ -36,7 +36,7 @@ def parse_kbank_pdf(pdf_stream):
                 line = line.strip()
                 if not line: continue
                 
-                # 1. เช็ควันที่ก่อน เพื่อป้องกันการข้ามรายการ "ถอนเงินสด"
+                # --- 1. เช็ควันทีก่อน (ลำดับนี้สำคัญมาก เพื่อไม่ให้ข้าม 'ถอนเงินสด') ---
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
                 
                 if date_match:
@@ -44,23 +44,27 @@ def parse_kbank_pdf(pdf_stream):
                     date = date_match.group(1)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
+                    
+                    # ค้นหาตัวเลขจำนวนเงินทั้งหมดในบรรทัด (เช่น ยอดธุรกรรม และ ยอดคงเหลือ)
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     
+                    # แยกคำอธิบายรายการ (Description)
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
-                    
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
                     
                     amount_val, balance = None, None
                     if len(amounts) == 1:
+                        # กรณีมีตัวเลขเดียว มักจะเป็นยอดคงเหลือในบรรทัด B/F
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
-                        # แยกฝั่งเงินเข้า/ออก
+                        # เช็คว่าเป็น ฝาก หรือ ถอน
                         is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
                         balance = str_to_float(amounts[-1])
 
+                    # แยกข้อความส่วนที่เหลือหลังยอดเงิน (ช่องทาง/รายละเอียด)
                     remaining = ""
                     if amounts:
                         parts = line.split(amounts[-1])
@@ -68,27 +72,27 @@ def parse_kbank_pdf(pdf_stream):
                     
                     chan, det = split_channel_and_detail(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
-                    continue
+                    continue # เมื่อเจอข้อมูลแล้วให้ไปบรรทัดถัดไปเลย
 
-                # 2. เช็คหัวตาราง
+                # --- 2. เช็คหัวตาราง ---
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
                 
-                # 3. เช็คจบรายการ
+                # --- 3. เช็คบรรทัดจบรายการ ---
                 if any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
-                # 4. เก็บรายละเอียดที่ไม่มีวันที่ (แถวว่างจำนวนเงิน)
+                # --- 4. รายละเอียดที่ไม่มีวันที่ (เช่น รายละเอียดชื่อผู้รับโอนที่ยาวลงมาอีกบรรทัด) ---
                 if is_in_table:
                     if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
                     c_extra, d_extra = split_channel_and_detail(line)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    # --- ขั้นตอนการกรองข้อมูลตามเงื่อนไขใหม่ ---
+    # --- กรองข้อมูลตามเงื่อนไขพิเศษ ---
     
-    # เงื่อนไขที่ 1: ลบ "ยอดยกมา" ให้เหลือแค่แถวเดียว (แถวแรกที่พบ)
+    # 1. ลบ "ยอดยกมา" ให้เหลือแค่ตัวแรกตัวเดียว
     temp_list_bf = []
     found_first_bf = False
     for row in all_parsed_rows:
@@ -97,33 +101,31 @@ def parse_kbank_pdf(pdf_stream):
             if not found_first_bf:
                 temp_list_bf.append(row)
                 found_first_bf = True
-            # ถ้าเจอตัวที่ 2 เป็นต้นไป จะไม่ถูกเพิ่มเข้า temp_list_bf (คือการลบทิ้ง)
         else:
             temp_list_bf.append(row)
 
-    # เงื่อนไขที่ 2: ถ้าแถวว่าง (จำนวนเงินเป็น None) ต่อกันมากกว่า 1 แถว ให้ลบทิ้งทั้งหมด
+    # 2. จัดการแถวว่าง (Amount is None)
     final_filtered_rows = []
-    i = 0
-    n = len(temp_list_bf)
+    i, n = 0, len(temp_list_bf)
     while i < n:
-        # ถ้าแถวนั้นมีจำนวนเงิน หรือเป็นยอดยกมา (ที่มีจำนวนเงินหรือยอดคงเหลือ) ให้เก็บไว้
+        # ถ้าแถวมีข้อมูลเงิน หรือเป็นยอดยกมา ให้เก็บไว้
         if temp_list_bf[i][3] is not None or any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
             final_filtered_rows.append(temp_list_bf[i])
             i += 1
         else:
-            # กรณีเจอแถวว่าง (Amount is None)
+            # ตรวจสอบบล็อกของแถวว่างที่ต่อเนื่องกัน
             empty_block = []
             while i < n and temp_list_bf[i][3] is None and not any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
                 empty_block.append(temp_list_bf[i])
                 i += 1
             
-            # เช็คจำนวนแถวว่างใน Block นั้น
+            # เงื่อนไข: ถ้าแถวว่างมีแค่ 1 แถว ให้เอาไปต่อกับรายละเอียดแถวบน
             if len(empty_block) == 1:
-                # ถ้ามีแถวเดียว ให้เก็บไว้ (อาจเป็นรายละเอียดต่อท้าย)
-                final_filtered_rows.append(empty_block[0])
-            else:
-                # ถ้ามีมากกว่า 1 แถว "ลบออกให้หมด" (ไม่ append เข้า final_filtered_rows)
-                pass
+                if final_filtered_rows:
+                    # นำรายละเอียดไป Merge กับแถวก่อนหน้า
+                    prev_row = final_filtered_rows[-1]
+                    prev_row[6] = (str(prev_row[6]) + " " + str(empty_block[0][6])).strip()
+            # ถ้าแถวว่าง > 1 แถว (เช่น หน้า... แผ่นที่...) ลบออกให้หมด (ไม่ทำอะไร)
             
     return final_filtered_rows
 
