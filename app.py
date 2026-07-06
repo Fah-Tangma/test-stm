@@ -220,6 +220,16 @@ def parse_ktb_pdf(pdf_stream):
     # คำหลักสำหรับยอดยกมา
     bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
 
+    ignore_keywords = [
+        "ธนาคารกรุงไทย", "หน้า", "รายการเดินบัญชี", "ชื่อบัญชี", "ประเภทบัญชี",
+        "เลขที่บัญชี", "รหัสสาขา", "ที่อยู่ปัจจุบัน", "ที่อยู่สาขา", "วงเงินเบิกเกินบัญชี",
+        "สกุลเงิน", "ติดต่อ เบอร์", "อีเมล", "Krungthai Bank", "Statement", 
+        "ยอดคงเหลือยกมา", "รวมรายการ", "เลขที่", "บริษัท ธนาคารกรุงไทย",
+        "ถนนสุขุมวิท", "แขวงคลองเตยเหนือ", "เขตวัฒนา", "กรุงเทพฯ", 
+        "Krungthai Corporate Call Center", "02-111-9999", 
+        "cash.management@krungthai.com", "www.krungthai.com"
+    ]
+
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
