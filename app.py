@@ -11,6 +11,41 @@ from datetime import datetime
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= 1. ฟังก์ชันช่วยเหลือ (Common Helpers) =================
+def str_to_float(val_str):
+    if val_str in [None, "", "-", " "]: return None
+    try:
+        clean_val = re.sub(r'[^\d.-]', '', str(val_str))
+        return float(clean_val)
+    except:
+        return None
+
+def decode_cid(text):
+    if not text: return ""
+    cid_map = {
+        "(cid:344)": "0", "(cid:345)": "1", "(cid:346)": "2", "(cid:347)": "3", "(cid:348)": "4",
+        "(cid:349)": "5", "(cid:350)": "6", "(cid:351)": "7", "(cid:352)": "8", "(cid:353)": "9",
+    }
+    for cid, val in cid_map.items():
+        text = text.replace(cid, val)
+    return text
+
+def split_channel_and_detail(text):
+    channels = [
+        "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
+        "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
+        "BRANCH", "K-Cash Connect Plus" , "Internet/Mobile GSB", "Internet/Mobile SCB", 
+        "Internet/Mobile KTB ", "Internet/Mobile TTB", "ตู้เติมเงิน / โมบาย แอปพลิชัน", "Internet/Mobile BAY", 
+        "Internet/Mobile BBL","Internet/Mobile BAAC", "สาขาถนนศรีสุริยวงศ์", "สาขาเซ็นทรัล ขอนแก่น"
+    ]
+    found_channel, detail_part = "-", text
+    for c in channels:
+        if c in text:
+            found_channel = c
+            detail_part = text.replace(c, "").strip()
+            break
+    return found_channel, detail_part
+
+# ================= 2. Logic สำหรับ KBank =================
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -180,62 +215,37 @@ def parse_scb_pdf(pdf_stream):
 # ================= 4. Logic สำหรับ KTB =================
 def parse_ktb_pdf(pdf_stream):
     all_data = []
-    ignore_keywords = ["ธนาคารกรุงไทย", "หน้า", "รายการเดินบัญชี", "ชื่อบัญชี", "ประเภทบัญชี",
-        "เลขที่บัญชี", "รหัสสาขา", "ที่อยู่ปัจจุบัน", "ที่อยู่สาขา", "วงเงินเบิกเกินบัญชี",
-        "สกุลเงิน", "ติดต่อ เบอร์", "อีเมล", "Krungthai Bank", "Statement", 
-        "ยอดคงเหลือยกมา", "รวมรายการ", "เลขที่", "บริษัท ธนาคารกรุงไทย",
-        "ถนนสุขุมวิท", "แขวงคลองเตยเหนือ", "เขตวัฒนา", "กรุงเทพฯ", 
-        "Krungthai Corporate Call Center", "02-111-9999", 
-        "cash.management@krungthai.com", "www.krungthai.com"]
-    
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP']
-
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
             text = decode_cid(text)
             lines = text.split('\n')
-            last_entry_idx = -1
-
+            last_idx = -1
             for line in lines:
                 line = line.strip()
-                if not line or any(keyword in line for keyword in ignore_keywords): continue
-
-                # รูปแบบ Biz (YYYY)
+                # Biz Format (YYYY)
                 biz_match = re.match(r'^(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s+(\w+)\s+(.*)', line)
                 if biz_match:
-                    date_str, time_val, transaction, rem_text = biz_match.groups()
-                    amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem_text)
-                    if len(amounts) >= 2:
-                        amount_val = str_to_float(amounts[0])
-                        balance_val = str_to_float(amounts[-1])
-                        final_amount = amount_val if ('DT' in transaction or 'CR' in transaction) else -amount_val
-                        branch = rem_text.split(amounts[-1])[-1].strip() or "Krungthai Business"
-                        all_data.append([date_str, time_val, transaction, rem_text.split(amounts[0])[0].strip(), final_amount, balance_val, branch])
-                        last_entry_idx = len(all_data) - 1
-                        continue
-
-                # รูปแบบบุคคล (YY)
+                    d, t, c, rem = biz_match.groups()
+                    amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
+                    if len(amts) >= 2:
+                        val = str_to_float(amts[0])
+                        f_amt = val if ('DT' in c or 'CR' in c) else -val
+                        all_data.append([d, t, c, rem.split(amts[0])[0].strip(), f_amt, str_to_float(amts[-1]), "KTB Biz"])
+                        last_idx = len(all_data) - 1
+                    continue
+                # Personal Format (YY)
                 main_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
                 if main_match:
-                    date_str, trans_name, code, rem_text = main_match.groups()
-                    amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem_text)
-                    if len(amounts) >= 2:
-                        raw_val = str_to_float(amounts[1]) if len(amounts) >= 3 and str_to_float(amounts[0]) == 0 else str_to_float(amounts[0])
-                        balance_val = str_to_float(amounts[-1])
-                        final_amount = raw_val if (code in deposit_codes or "เข้า" in trans_name) else -raw_val
-                        all_data.append([date_str, "", f"{trans_name} ({code})", rem_text.split(amounts[0])[0].strip(), final_amount, balance_val, line.split()[-1]])
-                        last_entry_idx = len(all_data) - 1
-                        continue
-
-                # เก็บเวลาและรายละเอียดเพิ่มเติม
-                time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
-                if time_row_match and last_entry_idx != -1:
-                    all_data[last_entry_idx][1] = time_row_match.group(1)
-                    if time_row_match.group(2): all_data[last_entry_idx][3] += " " + time_row_match.group(2).strip()
-                elif last_entry_idx != -1 and not re.match(r'^\d{2}/\d{2}/', line) and "C/F" not in line:
-                    all_data[last_entry_idx][3] += " " + line
+                    d, name, c, rem = main_match.groups()
+                    amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
+                    if len(amts) >= 2:
+                        raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
+                        f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
+                        all_data.append([d, "", f"{name} ({c})", rem.split(amts[0])[0].strip(), f_amt, str_to_float(amts[-1]), "KTB"])
+                        last_idx = len(all_data) - 1
     return all_data
 
 # ================= 5. Streamlit UI & Export =================
