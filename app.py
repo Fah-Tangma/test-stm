@@ -19,9 +19,6 @@ def str_to_float(val_str):
         return 0.0
 
 # ================= 2. Logic สำหรับ KBank =================
-import re
-import pdfplumber
-
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
