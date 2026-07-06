@@ -225,6 +225,7 @@ def parse_ktb_pdf(pdf_stream):
             lines = text.split('\n')
             last_idx = -1
             for line in lines:
+                if any(kw in line for kw in ["ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]):
                 line = line.strip()
                 # Biz Format (YYYY)
                 biz_match = re.match(r'^(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s+(\w+)\s+(.*)', line)
