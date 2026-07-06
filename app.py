@@ -10,13 +10,14 @@ from datetime import datetime
 # --- เพิ่มการ Import สำหรับ Gemini ---
 from google import genai
 from google.genai import types
+import os
 
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
-GEMINI_API_KEY = "AIzaSyDkhZ8RwAecTH-8tMq-4Zs-kFg3BEmwmUI" 
+api_key = os.getenv("AIzaSyDkhZ8RwAecTH-8tMq-4Zs-kFg3BEmwmUI")
 
 def process_bay_with_gemini(file_bytes, password):
     """ฟังก์ชันจัดการไฟล์ BAY ด้วย Gemini AI"""
