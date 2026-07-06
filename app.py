@@ -255,8 +255,6 @@ def parse_ktb_pdf(pdf_stream):
 
 # ================= 5. Streamlit UI & Export =================
 st.title("📑 PDF Statement to Excel")
-info_placeholder = st.empty()
-info_placeholder.info("รองรับ KBank, SCB และ KTB (เลือกประเภทธนาคารในแถบด้านข้าง)")
 
 with st.sidebar:
     st.header("ตัวเลือก")
@@ -269,15 +267,9 @@ if convert_button:
     if not pdf_files:
         st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
-        status_placeholder = st.empty()
-        progress_placeholder = st.empty()
         all_dfs = []
-        
         try:
-            for i, uploaded_file in enumerate(pdf_files):
-                status_placeholder.write(f"⏳ กำลังประมวลผล: {uploaded_file.name}...")
-                progress_placeholder.progress((i + 1) / len(pdf_files))
-                
+            for uploaded_file in pdf_files:
                 pdf_bytes = uploaded_file.read()
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
@@ -286,58 +278,55 @@ if convert_button:
                     
                     if bank_option == "กสิกรไทย (KBank)":
                         rows = parse_kbank_pdf(unlocked_io)
-                        cols = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
-                        df = pd.DataFrame(rows, columns=cols)
+                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
                     elif bank_option == "ไทยพาณิชย์ (SCB)":
                         rows = parse_scb_pdf(unlocked_io)
-                        cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"]
-                        df = pd.DataFrame(rows, columns=cols)
+                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"])
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     else: # KTB
                         rows = parse_ktb_pdf(unlocked_io)
-                        cols = ["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "สาขา"]
-                        df = pd.DataFrame(rows, columns=cols)
+                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "สาขา"])
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
-                status_placeholder.empty()
-                progress_placeholder.empty()
+                
+                # แสดงผลในหน้าเว็บ
                 st.dataframe(final_df, use_container_width=True)
 
+                # สร้าง Excel
                 output = io.BytesIO()
+                # กำหนด datetime_format='m/d/yyyy' ตรงนี้เพื่อให้ Excel แสดงผลตามต้องการ
                 with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
-                    sheet_name = 'Statement'
-                    final_df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    final_df.to_excel(writer, index=False, sheet_name='Statement')
                     workbook = writer.book
-                    worksheet = writer.sheets[sheet_name]
+                    worksheet = writer.sheets['Statement']
 
-                    # กำหนดสีตามธนาคาร
-                    if bank_option == "กสิกรไทย (KBank)":
-                        header_color, num_cols = '#00A950', 'D:E'
-                    elif bank_option == "ไทยพาณิชย์ (SCB)":
-                        header_color, num_cols = '#4E2E7F', 'E:F'
-                    else: #KTB
-                        header_color, num_cols = '#00A1E0', 'E:F'
-
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'align': 'center'})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right'})
-                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left', 'border': 0, 'valign': 'vcenter'})
-                    text_fmt = workbook.add_format({'valign': 'vcenter'})
+                    # ตั้งค่าสีหัวตาราง
+                    colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0'}
+                    h_color = colors.get(bank_option, '#333333')
+                    
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white', 'align': 'center'})
+                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                    # กำหนดฟอร์แมตวันที่สำหรับคอลัมน์ A (วันที่)
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
 
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    worksheet.set_column('A:A', 12, date_fmt)
-                    worksheet.set_column('B:D', 15, text_fmt)
-                    worksheet.set_column(num_cols, 18, num_fmt)
-                    worksheet.set_column('G:G', 50, text_fmt)
-
-                # ชื่อไฟล์ดาวน์โหลด
-                clean_name = re.sub(r'\.[pP][dD][fF]$', '', pdf_files[0].name)
-                dl_name = f"{clean_name}.xlsx" if len(pdf_files) == 1 else f"{clean_name}_combined.xlsx"
+                    # บังคับใช้ Date Format ในคอลัมน์แรก
+                    worksheet.set_column('A:A', 15, date_fmt)
+                    # ตั้งค่าตัวเลขในคอลัมน์จำนวนเงินและยอดคงเหลือ
+                    if bank_option == "กสิกรไทย (KBank)":
+                        worksheet.set_column('D:E', 15, num_fmt)
+                    else:
+                        worksheet.set_column('E:F', 15, num_fmt)
 
                 output.seek(0)
-                st.download_button(label=f"📥 ดาวน์โหลด Excel ({bank_option})", data=output, file_name=dl_name)
+                dl_name = f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, file_name=dl_name)
 
         except PasswordError:
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
