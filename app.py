@@ -214,8 +214,8 @@ def parse_scb_pdf(pdf_stream):
 
 # ================= 4. Logic สำหรับ KTB =================
 def parse_ktb_pdf(pdf_stream):
-    all_data = []
-    # รายการที่เป็น "เงินเข้า" (สำหรับรูปแบบที่ 2)
+    all_raw_rows = []
+    # รายการที่เป็น "เงินเข้า" (สำหรับรูปแบบ Personal)
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP']
     # คำหลักสำหรับยอดยกมา
     bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -224,7 +224,7 @@ def parse_ktb_pdf(pdf_stream):
         "ธนาคารกรุงไทย", "หน้า", "รายการเดินบัญชี", "ชื่อบัญชี", "ประเภทบัญชี",
         "เลขที่บัญชี", "รหัสสาขา", "ที่อยู่ปัจจุบัน", "ที่อยู่สาขา", "วงเงินเบิกเกินบัญชี",
         "สกุลเงิน", "ติดต่อ เบอร์", "อีเมล", "Krungthai Bank", "Statement", 
-        "ยอดคงเหลือยกมา", "รวมรายการ", "เลขที่", "บริษัท ธนาคารกรุงไทย",
+        "รวมรายการ", "เลขที่", "บริษัท ธนาคารกรุงไทย",
         "ถนนสุขุมวิท", "แขวงคลองเตยเหนือ", "เขตวัฒนา", "กรุงเทพฯ", 
         "Krungthai Corporate Call Center", "02-111-9999", 
         "cash.management@krungthai.com", "www.krungthai.com"
@@ -234,13 +234,19 @@ def parse_ktb_pdf(pdf_stream):
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
-            text = decode_cid(text)
+            text = decode_cid(text) # เรียกใช้ฟังก์ชัน decode (ถ้ามี)
             lines = text.split('\n')
             last_idx = -1
             
             for line in lines:
                 line = line.strip()
                 if not line: continue
+
+                # --- 0. ตรวจสอบ Ignore Keywords (ยกเว้นบรรทัดที่เป็นยอดยกมาตัวจริง) ---
+                # เราจะข้าม ignore keywords ทันที ยกเว้นถ้าบรรทัดนั้นมีตัวเลขเงิน (ซึ่งอาจเป็น B/F)
+                if any(kw in line for kw in ignore_keywords):
+                    if not re.search(r'\d+\.\d{2}', line): # ถ้าไม่มีตัวเลขเงิน ให้ข้ามเลย
+                        continue
 
                 # --- 1. ตรวจสอบ "ยอดยกมา" (Brought Forward) ---
                 if any(kw in line for kw in bf_keywords):
@@ -249,10 +255,10 @@ def parse_ktb_pdf(pdf_stream):
                     d_val = date_match.group(1) if date_match else ""
                     
                     if amts:
-                        # ยอดยกมาปกติจะมีตัวเลขเดียวคือ ยอดคงเหลือ
                         balance_val = str_to_float(amts[-1])
-                        all_data.append([d_val, "", "B/F", "ยอดคงเหลือยกมา (Balance Brought Forward)", 0.0, balance_val, "-"])
-                        last_idx = -1 # ไม่ต้องต่อรายละเอียดจากบรรทัด B/F
+                        # ใช้ Code "B/F" เพื่อการ Filter ภายหลัง
+                        all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา (Balance Brought Forward)", 0.0, balance_val, "-"])
+                        last_idx = len(all_raw_rows) - 1
                         continue
 
                 # --- 2. รูปแบบ Biz Format (YYYY) ---
@@ -262,16 +268,13 @@ def parse_ktb_pdf(pdf_stream):
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
                         val = str_to_float(amts[0])
-                        # ตัดสินว่าเป็นฝากหรือถอน
                         f_amt = val if ('DT' in c or 'CR' in c) else -val
                         balance_val = str_to_float(amts[-1])
                         detail = rem.split(amts[0])[0].strip()
-                        
-                        # หาชื่อสาขา (มักจะอยู่หลังยอดคงเหลือ)
                         branch = rem.split(amts[-1])[-1].strip() or "Krungthai Business"
                         
-                        all_data.append([d, t, c, detail, f_amt, balance_val, branch])
-                        last_idx = len(all_data) - 1
+                        all_raw_rows.append([d, t, c, detail, f_amt, balance_val, branch])
+                        last_idx = len(all_raw_rows) - 1
                     continue
 
                 # --- 3. รูปแบบ Personal Format (YY) ---
@@ -280,29 +283,64 @@ def parse_ktb_pdf(pdf_stream):
                     d, name, c, rem = main_match.groups()
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
-                        # กรณี IIPS ที่มีเลข 3 ชุด (ค่าธรรมเนียม | เงินโอน | ยอดคงเหลือ)
                         raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
                         f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
                         balance_val = str_to_float(amts[-1])
                         detail = rem.split(amts[0])[0].strip()
-                        branch = line.split()[-1] # สาขามักเป็นคำสุดท้าย
+                        branch = line.split()[-1]
 
-                        all_data.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
-                        last_idx = len(all_data) - 1
+                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
+                        last_idx = len(all_raw_rows) - 1
                         continue
 
-                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (สำหรับ Personal) ---
+                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (แถวว่างจำนวนเงิน) ---
                 time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
                 if time_row_match and last_idx != -1:
-                    all_data[last_idx][1] = time_row_match.group(1) # ใส่เวลา
+                    all_raw_rows[last_idx][1] = time_row_match.group(1)
                     if time_row_match.group(2):
-                        all_data[last_idx][3] += " " + time_row_match.group(2).strip()
+                        all_raw_rows[last_idx][3] += " " + time_row_match.group(2).strip()
                 elif last_idx != -1:
-                    # ถ้าไม่ใช่บรรทัดขึ้นต้นด้วยวันที่ใหม่ และไม่ใช่หัวตาราง ให้ถือเป็นรายละเอียดต่อท้าย
-                    if not re.match(r'^\d{2}/\d{2}/', line) and not any(x in line for x in ["หน้า", "ยอดคงเหลือ"]):
-                        all_data[last_idx][3] += " " + line
+                    # ถ้าไม่ใช่บรรทัดขึ้นต้นด้วยวันที่ใหม่ ให้ถือเป็นแถวรายละเอียด (Amount เป็น None)
+                    if not re.match(r'^\d{2}/\d{2}/', line):
+                        all_raw_rows.append(["", "", "", line, None, None, ""])
 
-    return all_data
+    # ================= 5. Filtering Process (ลบยอดยกมาซ้ำ และ ลบแถวว่าง > 1) =================
+
+    # ขั้นตอนที่ 5.1: ลบ "ยอดยกมา" (B/F) ให้เหลือแค่แถวแรกสุดตัวเดียว
+    temp_list_bf = []
+    found_first_bf = False
+    for row in all_raw_rows:
+        if row[2] == "B/F":
+            if not found_first_bf:
+                temp_list_bf.append(row)
+                found_first_bf = True
+        else:
+            temp_list_bf.append(row)
+
+    # ขั้นตอนที่ 5.2: ลบแถวว่าง (Amount is None) ที่ต่อเนื่องกันมากกว่า 1 แถว
+    final_filtered_rows = []
+    i, n = 0, len(temp_list_bf)
+    while i < n:
+        # ถ้าแถวนั้นมีจำนวนเงิน หรือเป็นยอดยกมาที่เลือกไว้ ให้เก็บไว้
+        if temp_list_bf[i][4] is not None or temp_list_bf[i][2] == "B/F":
+            final_filtered_rows.append(temp_list_bf[i])
+            i += 1
+        else:
+            # เริ่มตรวจสอบกลุ่มแถวว่าง
+            empty_block = []
+            while i < n and temp_list_bf[i][4] is None and temp_list_bf[i][2] != "B/F":
+                # กรองพวกคำใน ignore_keywords อีกครั้งเพื่อความชัวร์
+                if not any(kw in str(temp_list_bf[i][3]) for kw in ignore_keywords):
+                    empty_block.append(temp_list_bf[i])
+                i += 1
+            
+            # ถ้ามีแถวว่างแถวเดียว (มักจะเป็นรายละเอียดต่อท้าย) ให้เอาไป Merge กับแถวบน
+            if len(empty_block) == 1:
+                if final_filtered_rows:
+                    final_filtered_rows[-1][3] = (str(final_filtered_rows[-1][3]) + " " + str(empty_block[0][3])).strip()
+            # ถ้ามีมากกว่า 1 แถว ให้ "ลบทิ้งทั้งหมด" (ข้ามไปเลย)
+
+    return final_filtered_rows
 
 # ================= 5. Streamlit UI & Export =================
 st.title("📑 PDF Statement to Excel")
