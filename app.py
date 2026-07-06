@@ -273,7 +273,7 @@ if convert_button:
         
         all_dfs = []
         try:
-            for uploaded_file in pdf_files:
+            for i, uploaded_file in enumerate(pdf_files):
                 # แสดงสถานะปัจจุบัน
                 status_placeholder.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
                 progress_placeholder.progress((i + 1) / len(pdf_files))
