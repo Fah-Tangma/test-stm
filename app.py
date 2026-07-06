@@ -17,7 +17,7 @@ st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
-GEMINI_API_KEY = st.secrets["AIzaSyDkhZ8RwAecTH-8tMq-4Zs-kFg3BEmwmUI"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 def process_bay_with_gemini(file_bytes, password):
     """ฟังก์ชันจัดการไฟล์ BAY ด้วย Gemini AI"""
