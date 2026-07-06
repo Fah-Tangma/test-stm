@@ -11,42 +11,6 @@ from datetime import datetime
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= 1. ฟังก์ชันช่วยเหลือ (Common Helpers) =================
-def str_to_float(val_str):
-    if val_str in [None, "", "-", " "]: return None
-    try:
-        clean_val = re.sub(r'[^\d.-]', '', str(val_str))
-        return float(clean_val)
-    except:
-        return None
-
-def decode_cid(text):
-    """แปลงรหัส CID เป็นตัวเลขสำหรับ KTB"""
-    if not text: return ""
-    cid_map = {
-        "(cid:344)": "0", "(cid:345)": "1", "(cid:346)": "2", "(cid:347)": "3", "(cid:348)": "4",
-        "(cid:349)": "5", "(cid:350)": "6", "(cid:351)": "7", "(cid:352)": "8", "(cid:353)": "9",
-    }
-    for cid, val in cid_map.items():
-        text = text.replace(cid, val)
-    return text
-
-def split_channel_and_detail(text):
-    channels = [
-        "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
-        "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
-        "BRANCH", "K-Cash Connect Plus" , "Internet/Mobile GSB", "Internet/Mobile SCB", 
-        "Internet/Mobile KTB ", "Internet/Mobile TTB", "ตู้เติมเงิน / โมบาย แอปพลิชัน", "Internet/Mobile BAY", 
-        "Internet/Mobile BBL","Internet/Mobile BAAC", "สาขาถนนศรีสุริยวงศ์", "สาขาเซ็นทรัล ขอนแก่น"
-    ]
-    found_channel, detail_part = "-", text
-    for c in channels:
-        if c in text:
-            found_channel = c
-            detail_part = text.replace(c, "").strip()
-            break
-    return found_channel, detail_part
-
-# ================= 2. Logic สำหรับ KBank =================
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
