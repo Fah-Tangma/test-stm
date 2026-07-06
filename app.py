@@ -363,7 +363,7 @@ if convert_button:
                     h_color = colors.get(bank_option, '#333333')
                     
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white', 'align': 'center'})
-                    num_fmt = workbook.add_format(({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
                     # กำหนดฟอร์แมตวันที่สำหรับคอลัมน์ A (วันที่)
                     date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
 
