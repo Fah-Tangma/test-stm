@@ -316,20 +316,21 @@ if convert_button:
                         header_color, num_cols = '#00A950', 'D:E'
                     elif bank_option == "ไทยพาณิชย์ (SCB)":
                         header_color, num_cols = '#4E2E7F', 'E:F'
-                    else: # KTB
+                    else: bank_option == "กรุงไทย (KTB)":
                         header_color, num_cols = '#00A1E0', 'E:F'
 
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'align': 'center'})
                     num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right'})
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left', 'border': 0, 'valign': 'vcenter'})
                     text_fmt = workbook.add_format({'valign': 'vcenter'})
 
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    worksheet.set_column('A:A', 12)
-                    worksheet.set_column('B:D', 15, text_fmt)
-                    worksheet.set_column(num_cols, 18, num_fmt)
-                    worksheet.set_column('G:G', 50, text_fmt)
+                    worksheet.set_column('A:A', 15, date_fmt)
+                    worksheet.set_column('B:D', 10, text_fmt)
+                    worksheet.set_column(num_cols_range, 20, num_fmt)
+                    worksheet.set_column('G:G', 80, text_fmt)
 
                 # ชื่อไฟล์ดาวน์โหลด
                 clean_name = re.sub(r'\.[pP][dD][fF]$', '', pdf_files[0].name)
