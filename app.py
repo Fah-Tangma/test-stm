@@ -197,31 +197,36 @@ def parse_scb_pdf(pdf_stream):
 
 # ================= 4. Streamlit UI & Excel Export =================
 
-st.title("📑 PDF Statement to Excel Converter")
+st.title("📑 PDF Statement to Excel")
 
+# ใช้ Placeholder สำหรับ Info เพื่อให้สั่งลบได้ในภายหลังถ้าต้องการ
 info_placeholder = st.empty()
-info_placeholder.info("อัพโหลด PDF เพื่อรวมข้อมูล (ลบแถวว่างส่วนเกินและยอดยกมาซ้ำซ้อนให้อัตโนมัติ)")
+info_placeholder.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
 
 with st.sidebar:
     st.header("ตัวเลือก")
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF (สูงสุด 5 ไฟล์)", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
-    convert_button = st.button("เริ่มการแปลงไฟล์")
+    convert_button = st.button("เริ่มการแปลงไฟล์ทั้งหมด")
 
 if convert_button:
     if not pdf_files:
         st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
-        status_placeholder = st.empty()
-        progress_bar = st.progress(0)
-        all_dfs = []
+        # --- สร้าง Placeholder สำหรับ แถบสถานะต่างๆ ---
+        status_placeholder = st.empty()   # สำหรับ "กำลังประมวลผล..."
+        progress_placeholder = st.empty() # สำหรับ Progress Bar
+        success_placeholder = st.empty()  # สำหรับ แถบสีเขียว
         
+        all_dfs = []
         try:
             for i, uploaded_file in enumerate(pdf_files):
-                status_placeholder.write(f"⏳ กำลังประมวลผล: {uploaded_file.name}...")
-                pdf_bytes = uploaded_file.read()
+                # แสดงสถานะปัจจุบัน
+                status_placeholder.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
+                progress_placeholder.progress((i + 1) / len(pdf_files))
                 
+                pdf_bytes = uploaded_file.read()
                 with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                     unlocked_io = io.BytesIO()
                     pdf.save(unlocked_io)
@@ -231,50 +236,66 @@ if convert_button:
                         rows = parse_kbank_pdf(unlocked_io)
                         cols = ["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
                     else:
                         rows = parse_scb_pdf(unlocked_io)
-                        cols = ["วันที่", "เวลา", "รายการ", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"]
+                        cols = ["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"]
                         df = pd.DataFrame(rows, columns=cols)
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     all_dfs.append(df)
-                progress_bar.progress((i + 1) / len(pdf_files))
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
+
+                # --- เคลียร์แถบสถานะทิ้ง (ให้หายไปจากหน้าจอ) ---
                 status_placeholder.empty()
-                progress_bar.empty()
+                progress_placeholder.empty()
+                # info_placeholder.empty() # ถ้าต้องการให้ Info ด้านบนหายไปด้วย ให้เอาคอมเม้นต์ออก
                 
+                # แสดงตารางผลลัพธ์
                 st.dataframe(final_df, use_container_width=True)
 
                 # สร้าง Excel
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    final_df.to_excel(writer, index=False, sheet_name='Statement')
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
+                    sheet_name = 'Statement'
+                    final_df.to_excel(writer, index=False, sheet_name=sheet_name)
                     workbook = writer.book
-                    worksheet = writer.sheets['Statement']
-                    
-                    header_color = '#00A950' if bank_option == "กสิกรไทย (KBank)" else '#4E2E7F'
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'border': 1, 'align': 'center'})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right', 'border': 1})
-                    text_fmt = workbook.add_format({'align': 'left', 'border': 1})
+                    worksheet = writer.sheets[sheet_name]
+
+                    is_scb = (bank_option == "ไทยพาณิชย์ (SCB)")
+                    header_color = '#4E2E7F' if is_scb else '#00A950'
+                    num_cols_range = 'E:F' if is_scb else 'D:E'
+
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': header_color, 'font_color': 'white', 'border': 0, 'align': 'center', 'valign': 'vcenter'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left', 'border': 0, 'valign': 'vcenter'})
+                    text_fmt = workbook.add_format({'border': 0, 'valign': 'vcenter'})
 
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
-                        worksheet.set_column(col_num, col_num, 15, text_fmt)
-                    
-                    # ปรับคอลัมน์ตัวเลข
-                    idx_money = 3 if bank_option == "กสิกรไทย (KBank)" else 4
-                    worksheet.set_column(idx_money, idx_money+1, 18, num_fmt)
-                    worksheet.set_column(6, 6, 60, text_fmt) # รายละเอียดกว้างหน่อย
+
+                    worksheet.set_column('A:A', 15, date_fmt)
+                    worksheet.set_column('B:D', 10, text_fmt)
+                    worksheet.set_column(num_cols_range, 20, num_fmt)
+                    worksheet.set_column('G:G', 80, text_fmt)
 
                 output.seek(0)
                 st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ Excel",
+                    label=f"📥 ดาวน์โหลดไฟล์ Excel ({bank_option})",
                     data=output,
-                    file_name=f"Statement_{bank_option.split(' ')[0]}.xlsx",
+                    file_name=f"Combined_Statement.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+                
+                # แสดงความสำเร็จแวบเดียว หรือไม่แสดงเลยตามใจคนใช้
+                # success_placeholder.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
 
         except PasswordError:
+            status_placeholder.empty()
+            progress_placeholder.empty()
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
         except Exception as e:
+            status_placeholder.empty()
+            progress_placeholder.empty()
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
