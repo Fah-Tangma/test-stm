@@ -251,6 +251,10 @@ def parse_ktb_pdf(pdf_stream):
 # ================= 5. Streamlit UI & Export =================
 st.title("📑 PDF Statement to Excel")
 
+# ใช้ Placeholder สำหรับ Info เพื่อให้สั่งลบได้ในภายหลังถ้าต้องการ
+info_placeholder = st.empty()
+info_placeholder.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
+
 with st.sidebar:
     st.header("ตัวเลือก")
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)"])
