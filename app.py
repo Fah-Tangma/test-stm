@@ -215,8 +215,11 @@ def parse_scb_pdf(pdf_stream):
 # ================= 4. Logic สำหรับ KTB =================
 def parse_ktb_pdf(pdf_stream):
     all_data = []
-    bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
+    # รายการที่เป็น "เงินเข้า" (สำหรับรูปแบบที่ 2)
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP']
+    # คำหลักสำหรับยอดยกมา
+    bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
+
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
@@ -224,30 +227,71 @@ def parse_ktb_pdf(pdf_stream):
             text = decode_cid(text)
             lines = text.split('\n')
             last_idx = -1
+            
             for line in lines:
-                if any(kw in line for kw in ["ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]):
                 line = line.strip()
-                # Biz Format (YYYY)
+                if not line: continue
+
+                # --- 1. ตรวจสอบ "ยอดยกมา" (Brought Forward) ---
+                if any(kw in line for kw in bf_keywords):
+                    amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
+                    date_match = re.search(r'(\d{2}/\d{2}/\d{2,4})', line)
+                    d_val = date_match.group(1) if date_match else ""
+                    
+                    if amts:
+                        # ยอดยกมาปกติจะมีตัวเลขเดียวคือ ยอดคงเหลือ
+                        balance_val = str_to_float(amts[-1])
+                        all_data.append([d_val, "", "B/F", "ยอดคงเหลือยกมา (Balance Brought Forward)", 0.0, balance_val, "-"])
+                        last_idx = -1 # ไม่ต้องต่อรายละเอียดจากบรรทัด B/F
+                        continue
+
+                # --- 2. รูปแบบ Biz Format (YYYY) ---
                 biz_match = re.match(r'^(\d{2}/\d{2}/\d{4})\s+(\d{2}:\d{2})\s+(\w+)\s+(.*)', line)
                 if biz_match:
                     d, t, c, rem = biz_match.groups()
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
                         val = str_to_float(amts[0])
+                        # ตัดสินว่าเป็นฝากหรือถอน
                         f_amt = val if ('DT' in c or 'CR' in c) else -val
-                        all_data.append([d, t, c, rem.split(amts[0])[0].strip(), f_amt, str_to_float(amts[-1]), "KTB Biz"])
+                        balance_val = str_to_float(amts[-1])
+                        detail = rem.split(amts[0])[0].strip()
+                        
+                        # หาชื่อสาขา (มักจะอยู่หลังยอดคงเหลือ)
+                        branch = rem.split(amts[-1])[-1].strip() or "Krungthai Business"
+                        
+                        all_data.append([d, t, c, detail, f_amt, balance_val, branch])
                         last_idx = len(all_data) - 1
                     continue
-                # Personal Format (YY)
+
+                # --- 3. รูปแบบ Personal Format (YY) ---
                 main_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
                 if main_match:
                     d, name, c, rem = main_match.groups()
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
+                        # กรณี IIPS ที่มีเลข 3 ชุด (ค่าธรรมเนียม | เงินโอน | ยอดคงเหลือ)
                         raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
                         f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
-                        all_data.append([d, "", f"{name} ({c})", rem.split(amts[0])[0].strip(), f_amt, str_to_float(amts[-1]), "KTB"])
+                        balance_val = str_to_float(amts[-1])
+                        detail = rem.split(amts[0])[0].strip()
+                        branch = line.split()[-1] # สาขามักเป็นคำสุดท้าย
+
+                        all_data.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
                         last_idx = len(all_data) - 1
+                        continue
+
+                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (สำหรับ Personal) ---
+                time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
+                if time_row_match and last_idx != -1:
+                    all_data[last_idx][1] = time_row_match.group(1) # ใส่เวลา
+                    if time_row_match.group(2):
+                        all_data[last_idx][3] += " " + time_row_match.group(2).strip()
+                elif last_idx != -1:
+                    # ถ้าไม่ใช่บรรทัดขึ้นต้นด้วยวันที่ใหม่ และไม่ใช่หัวตาราง ให้ถือเป็นรายละเอียดต่อท้าย
+                    if not re.match(r'^\d{2}/\d{2}/', line) and not any(x in line for x in ["หน้า", "ยอดคงเหลือ"]):
+                        all_data[last_idx][3] += " " + line
+
     return all_data
 
 # ================= 5. Streamlit UI & Export =================
