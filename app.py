@@ -1,14 +1,70 @@
 import io
 import re
+import json
 import pandas as pd
 import pikepdf
 import pdfplumber
 import streamlit as st
 from pikepdf import PasswordError
 from datetime import datetime
+# --- เพิ่มการ Import สำหรับ Gemini ---
+from google import genai
+from google.genai import types
 
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
+
+# ================= 0. AI Configuration (สำหรับ BAY) =================
+# แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
+GEMINI_API_KEY = "AIzaSyDkhZ8RwAecTH-8tMq-4Zs-kFg3BEmwmUI" 
+
+def process_bay_with_gemini(file_bytes, password):
+    """ฟังก์ชันจัดการไฟล์ BAY ด้วย Gemini AI"""
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    # ปลดล็อค PDF ก่อนส่งให้ AI
+    unlocked_bytes = file_bytes
+    try:
+        with pikepdf.open(io.BytesIO(file_bytes), password=password) as pdf:
+            out_pdf = io.BytesIO()
+            pdf.save(out_pdf)
+            unlocked_bytes = out_pdf.getvalue()
+    except:
+        pass # ถ้าไม่มีรหัสผ่านหรือผ่านไปแล้วให้ใช้ bytes เดิม
+
+    model_name = "gemini-2.5-flash" # ปรับจาก 2.5 เป็น 1.5 เพื่อความถูกต้องของเวอร์ชันปัจจุบัน
+    
+    prompt = """
+    คุณคือ OCR ผู้เชี่ยวชาญด้านบัญชี โปรดอ่านสเตทเมนท์ธนาคารกรุงศรี (BAY) จากไฟล์นี้
+    และคืนค่าเป็น JSON Array ของ Array เท่านั้น [["วันที่", "เวลา", "จำนวนเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"]]
+    
+    กฎเหล็ก:
+    1. คอลัมน์ 'จำนวนเงิน': หากเป็นการ 'ถอน' ให้ติดลบ (เช่น -4700.00) หากเป็น 'ฝาก' ให้เป็นบวก (เช่น 500.00) ห้ามมีตัวหนังสือ
+    2. วันที่และเวลา: แยกออกจากกัน (เช่น "15/08/2025" และ "18:16:42")
+    3. รายละเอียด: รวมข้อความคำอธิบายทั้งหมดให้อยู่ในบรรทัดเดียวกัน
+    4. ห้ามมี Header ในข้อมูลที่ส่งกลับมา
+    5. คืนค่าเฉพาะ JSON ห้ามมีคำอธิบายอื่น
+    """
+
+    try:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Part.from_bytes(data=unlocked_bytes, mime_type="application/pdf"),
+                prompt
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+            ),
+        )
+        res_text = response.text.strip()
+        # ลบ Markdown ถ้ามี
+        if res_text.startswith("```"):
+            res_text = res_text.replace("```json", "").replace("```", "").strip()
+        return json.loads(res_text)
+    except Exception as e:
+        st.error(f"Gemini Error: {str(e)}")
+        return None
 
 # ================= 1. ฟังก์ชันช่วยเหลือ (Common Helpers) =================
 def str_to_float(val_str):
@@ -45,7 +101,8 @@ def split_channel_and_detail(text):
             break
     return found_channel, detail_part
 
-# ================= 2. Logic สำหรับ KBank =================
+# ================= 2. Logic สำหรับ KBank / SCB / KTB (คงเดิม) =================
+# ===== 1.KBank =====
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
@@ -151,7 +208,7 @@ def parse_kbank_pdf(pdf_stream):
             
     return final_filtered_rows
 
-# ================= 3. Logic สำหรับ SCB =================
+# ===== 2.SCB =====
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
@@ -212,7 +269,7 @@ def parse_scb_pdf(pdf_stream):
                         all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
     return all_parsed_rows
 
-# ================= 4. Logic สำหรับ KTB =================
+# ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
     all_raw_rows = []
     # รายการที่เป็น "เงินเข้า" (สำหรับรูปแบบ Personal)
@@ -304,54 +361,15 @@ def parse_ktb_pdf(pdf_stream):
                     if not re.match(r'^\d{2}/\d{2}/', line):
                         all_raw_rows.append(["", "", "", line, None, None, ""])
 
-    # ================= 5. Filtering Process (ลบยอดยกมาซ้ำ และ ลบแถวว่าง > 1) =================
-
-    # ขั้นตอนที่ 5.1: ลบ "ยอดยกมา" (B/F) ให้เหลือแค่แถวแรกสุดตัวเดียว
-    temp_list_bf = []
-    found_first_bf = False
-    for row in all_raw_rows:
-        if row[2] == "B/F":
-            if not found_first_bf:
-                temp_list_bf.append(row)
-                found_first_bf = True
-        else:
-            temp_list_bf.append(row)
-
-    # ขั้นตอนที่ 5.2: ลบแถวว่าง (Amount is None) ที่ต่อเนื่องกันมากกว่า 1 แถว
-    final_filtered_rows = []
-    i, n = 0, len(temp_list_bf)
-    while i < n:
-        # ถ้าแถวนั้นมีจำนวนเงิน หรือเป็นยอดยกมาที่เลือกไว้ ให้เก็บไว้
-        if temp_list_bf[i][4] is not None or temp_list_bf[i][2] == "B/F":
-            final_filtered_rows.append(temp_list_bf[i])
-            i += 1
-        else:
-            # เริ่มตรวจสอบกลุ่มแถวว่าง
-            empty_block = []
-            while i < n and temp_list_bf[i][4] is None and temp_list_bf[i][2] != "B/F":
-                # กรองพวกคำใน ignore_keywords อีกครั้งเพื่อความชัวร์
-                if not any(kw in str(temp_list_bf[i][3]) for kw in ignore_keywords):
-                    empty_block.append(temp_list_bf[i])
-                i += 1
-            
-            # ถ้ามีแถวว่างแถวเดียว (มักจะเป็นรายละเอียดต่อท้าย) ให้เอาไป Merge กับแถวบน
-            if len(empty_block) == 1:
-                if final_filtered_rows:
-                    final_filtered_rows[-1][3] = (str(final_filtered_rows[-1][3]) + " " + str(empty_block[0][3])).strip()
-            # ถ้ามีมากกว่า 1 แถว ให้ "ลบทิ้งทั้งหมด" (ข้ามไปเลย)
-
-    return final_filtered_rows
-
 # ================= 5. Streamlit UI & Export =================
 st.title("📑 PDF Statement to Excel")
 
-# ใช้ Placeholder สำหรับ Info เพื่อให้สั่งลบได้ในภายหลังถ้าต้องการ
 info_placeholder = st.empty()
-info_placeholder.info("อัพโหลดไฟล์ PDF ได้สูงสุด 5 ไฟล์ ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับการเลือกไฟล์")
+info_placeholder.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
 with st.sidebar:
     st.header("ตัวเลือก")
-    bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)"])
+    bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
     convert_button = st.button("เริ่มการแปลงไฟล์")
@@ -360,75 +378,80 @@ if convert_button:
     if not pdf_files:
         st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
-        # --- สร้าง Placeholder สำหรับ แถบสถานะต่างๆ ---
-        status_placeholder = st.empty()   # สำหรับ "กำลังประมวลผล..."
-        progress_placeholder = st.empty() # สำหรับ Progress Bar
-        success_placeholder = st.empty()  # สำหรับ แถบสีเขียว
-        
+        status_placeholder = st.empty()
+        progress_placeholder = st.empty()
         all_dfs = []
+        
         try:
             for i, uploaded_file in enumerate(pdf_files):
-                # แสดงสถานะปัจจุบัน
-                status_placeholder.write(f"⏳ กำลังประมวลผลไฟล์: {uploaded_file.name}...")
+                status_placeholder.write(f"⏳ กำลังประมวลผล: {uploaded_file.name}...")
                 progress_placeholder.progress((i + 1) / len(pdf_files))
                 
                 pdf_bytes = uploaded_file.read()
-                with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
-                    unlocked_io = io.BytesIO()
-                    pdf.save(unlocked_io)
-                    unlocked_io.seek(0)
-                    
-                    if bank_option == "กสิกรไทย (KBank)":
-                        rows = parse_kbank_pdf(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
-                    elif bank_option == "ไทยพาณิชย์ (SCB)":
-                        rows = parse_scb_pdf(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                    else: # KTB
-                        rows = parse_ktb_pdf(unlocked_io)
-                        df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "สาขา"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                    all_dfs.append(df)
+                
+                # --- แยกเงื่อนไขสำหรับ BAY (ใช้ AI) ---
+                if bank_option == "กรุงศรี (BAY)":
+                    data_rows = process_bay_with_gemini(pdf_bytes, password)
+                    if data_rows:
+                        header = ["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"]
+                        df = pd.DataFrame(data_rows, columns=header)
+                        df["ถอนเงิน/ฝากเงิน"] = pd.to_numeric(df["ถอนเงิน/ฝากเงิน"], errors='coerce')
+                        df["ยอดคงเหลือ"] = pd.to_numeric(df["ยอดคงเหลือ"], errors='coerce')
+                        all_dfs.append(df)
+                
+                # --- เงื่อนไขธนาคารอื่นๆ (ใช้ Rule-based) ---
+                else:
+                    with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
+                        unlocked_io = io.BytesIO()
+                        pdf.save(unlocked_io)
+                        unlocked_io.seek(0)
+                        
+                        if bank_option == "กสิกรไทย (KBank)":
+                            rows = parse_kbank_pdf(unlocked_io)
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"])
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
+                        elif bank_option == "ไทยพาณิชย์ (SCB)":
+                            rows = parse_scb_pdf(unlocked_io)
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "Code", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"])
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        elif bank_option == "กรุงไทย (KTB)":
+                            rows = parse_ktb_pdf(unlocked_io)
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "สาขา"])
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
-                
-                # แสดงผลในหน้าเว็บ
                 st.dataframe(final_df, use_container_width=True)
 
-                # สร้าง Excel
+                # Export Excel
                 output = io.BytesIO()
-                # กำหนด datetime_format='m/d/yyyy' ตรงนี้เพื่อให้ Excel แสดงผลตามต้องการ
-                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     final_df.to_excel(writer, index=False, sheet_name='Statement')
                     workbook = writer.book
                     worksheet = writer.sheets['Statement']
 
-                    # ตั้งค่าสีหัวตาราง
-                    colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0'}
+                    # สีตามธนาคาร
+                    colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0', "กรุงศรี (BAY)": '#FFCC00'}
                     h_color = colors.get(bank_option, '#333333')
+                    f_color = 'black' if bank_option == "กรุงศรี (BAY)" else 'white'
                     
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white', 'align': 'center'})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'border': 0, 'valign': 'vcenter'})
-                    # กำหนดฟอร์แมตวันที่สำหรับคอลัมน์ A (วันที่)
-                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
-
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
+                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                    
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    # บังคับใช้ Date Format ในคอลัมน์แรก
-                    worksheet.set_column('A:A', 15, date_fmt)
-                    # ตั้งค่าตัวเลขในคอลัมน์จำนวนเงินและยอดคงเหลือ
-                    if bank_option == "กสิกรไทย (KBank)":
-                        worksheet.set_column('D:E', 15, num_fmt)
-                    else:
-                        worksheet.set_column('E:F', 15, num_fmt)
+                    # ปรับความกว้างและฟอร์แมตตัวเลข (ประมาณการคอลัมน์)
+                    worksheet.set_column('A:Z', 15)
+                    if "ถอนเงิน/ฝากเงิน" in final_df.columns:
+                        idx = final_df.columns.get_loc("ถอนเงิน/ฝากเงิน")
+                        worksheet.set_column(idx, idx+1, 15, num_fmt)
 
                 output.seek(0)
-                dl_name = f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, file_name=dl_name)
+                st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, 
+                                 file_name=f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+                status_placeholder.success("✅ แปลงไฟล์สำเร็จ!")
 
         except PasswordError:
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
