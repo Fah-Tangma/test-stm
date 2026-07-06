@@ -135,7 +135,15 @@ def parse_kbank_pdf(pdf_stream):
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = ["Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description", "Balance Carried Forward"]
+    ignore_keywords = [
+        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
+        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
+        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
+        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
+        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
+        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
+        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
+    ]
     pending_desc = ""
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
@@ -149,26 +157,39 @@ def parse_scb_pdf(pdf_stream):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
                         balance = str_to_float(amounts[-1])
-                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา"])
+                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
                     continue
+                if any(kw in line for kw in ignore_keywords): continue
                 transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 if transaction_match:
-                    date_str, time_str = transaction_match.groups()
+                    date_str = transaction_match.group(1)
+                    time_str = transaction_match.group(2)
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
-                    parts = line.replace(date_str, "").replace(time_str, "").split()
+                    temp_text = line.replace(date_str, "").replace(time_str, "").strip()
+                    parts = temp_text.split()
                     code = parts[0] if len(parts) > 0 else "-"
                     channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
                     amount_val, balance_val = 0.0, 0.0
                     if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
                         raw_amount = str_to_float(amounts[-2])
-                        amount_val = raw_amount if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR'] else -raw_amount
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR']:
+                            amount_val = raw_amount
+                        else:
+                            amount_val = -raw_amount
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
                     line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
-                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, line_desc.strip()])
+                    if channel != "-": line_desc = line_desc.replace(channel, "", 1)
+                    for amt in amounts: line_desc = line_desc.replace(amt, "")
+                    final_desc = (pending_desc + " " + line_desc.strip()).strip()
+                    pending_desc = ""
+                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, final_desc])
                 elif all_parsed_rows:
-                    all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+                    if line.startswith(("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม")):
+                        pending_desc = (pending_desc + " " + line).strip()
+                    else:
+                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
     return all_parsed_rows
 
 # ================= 4. Logic สำหรับ KTB =================
