@@ -262,4 +262,19 @@ if convert_button:
                         worksheet.set_column(col_num, col_num, 15, text_fmt)
                     
                     # ปรับคอลัมน์ตัวเลข
-                    idx_money = 3 if bank_option == "ก
+                    idx_money = 3 if bank_option == "กสิกรไทย (KBank)" else 4
+                    worksheet.set_column(idx_money, idx_money+1, 18, num_fmt)
+                    worksheet.set_column(6, 6, 60, text_fmt) # รายละเอียดกว้างหน่อย
+
+                output.seek(0)
+                st.download_button(
+                    label="📥 ดาวน์โหลดไฟล์ Excel",
+                    data=output,
+                    file_name=f"Statement_{bank_option.split(' ')[0]}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+        except PasswordError:
+            st.error("❌ รหัสผ่านไม่ถูกต้อง")
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
