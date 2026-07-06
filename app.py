@@ -215,7 +215,7 @@ def parse_scb_pdf(pdf_stream):
 # ================= 4. Logic สำหรับ KTB =================
 def parse_ktb_pdf(pdf_stream):
     all_data = []
-    bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
+    bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP']
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
