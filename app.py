@@ -266,6 +266,11 @@ if convert_button:
     if not pdf_files:
         st.error("⚠️ กรุณาเลือกไฟล์ PDF")
     else:
+        # --- สร้าง Placeholder สำหรับ แถบสถานะต่างๆ ---
+        status_placeholder = st.empty()   # สำหรับ "กำลังประมวลผล..."
+        progress_placeholder = st.empty() # สำหรับ Progress Bar
+        success_placeholder = st.empty()  # สำหรับ แถบสีเขียว
+        
         all_dfs = []
         try:
             for uploaded_file in pdf_files:
