@@ -305,7 +305,7 @@ if convert_button:
                 st.dataframe(final_df, use_container_width=True)
 
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     sheet_name = 'Statement'
                     final_df.to_excel(writer, index=False, sheet_name=sheet_name)
                     workbook = writer.book
