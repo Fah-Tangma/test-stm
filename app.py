@@ -327,10 +327,10 @@ if convert_button:
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
-                    worksheet.set_column('A:A', 15, date_fmt)
-                    worksheet.set_column('B:D', 10, text_fmt)
-                    worksheet.set_column(num_cols_range, 20, num_fmt)
-                    worksheet.set_column('G:G', 80, text_fmt)
+                    worksheet.set_column('A:A', 12, date_fmt)
+                    worksheet.set_column('B:D', 15, text_fmt)
+                    worksheet.set_column(num_cols, 18, num_fmt)
+                    worksheet.set_column('G:G', 50, text_fmt)
 
                 # ชื่อไฟล์ดาวน์โหลด
                 clean_name = re.sub(r'\.[pP][dD][fF]$', '', pdf_files[0].name)
