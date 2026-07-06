@@ -244,15 +244,14 @@ if convert_button:
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                     all_dfs.append(df)
 
+            # ... (โค้ดส่วนบนเหมือนเดิมจนถึงส่วน Export) ...
+
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
 
-                # --- เคลียร์แถบสถานะทิ้ง (ให้หายไปจากหน้าจอ) ---
                 status_placeholder.empty()
                 progress_placeholder.empty()
-                # info_placeholder.empty() # ถ้าต้องการให้ Info ด้านบนหายไปด้วย ให้เอาคอมเม้นต์ออก
                 
-                # แสดงตารางผลลัพธ์
                 st.dataframe(final_df, use_container_width=True)
 
                 # สร้าง Excel
@@ -280,16 +279,24 @@ if convert_button:
                     worksheet.set_column(num_cols_range, 20, num_fmt)
                     worksheet.set_column('G:G', 80, text_fmt)
 
+                # --- จัดการชื่อไฟล์สำหรับดาวน์โหลด ---
+                if len(pdf_files) == 1:
+                    # ตัดนามสกุลไฟล์ออก (.pdf, .PDF) แล้วใส่ .xlsx แทน
+                    raw_name = pdf_files[0].name
+                    clean_name = re.sub(r'\.[pP][dD][fF]$', '', raw_name)
+                    download_filename = f"{clean_name}.xlsx"
+                else:
+                    raw_name = pdf_files[0].name
+                    clean_name = re.sub(r'\.[pP][dD][fF]$', '', raw_name)
+                    download_filename = f"{clean_name}_combined.xlsx"
+
                 output.seek(0)
                 st.download_button(
                     label=f"📥 ดาวน์โหลดไฟล์ Excel ({bank_option})",
                     data=output,
-                    file_name=f"Combined_Statement.xlsx",
+                    file_name=download_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                
-                # แสดงความสำเร็จแวบเดียว หรือไม่แสดงเลยตามใจคนใช้
-                # success_placeholder.success(f"✅ รวมไฟล์สำเร็จ ({len(pdf_files)} ไฟล์)")
 
         except PasswordError:
             status_placeholder.empty()
