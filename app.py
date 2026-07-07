@@ -490,7 +490,7 @@ if convert_button:
                     # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
                     # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
                     for idx, col_name in enumerate(final_df.columns):
-                        if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน"]):
+                        if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี"]):
                             worksheet.set_column(idx, idx, 15, num_fmt)
 
                 output.seek(0)
