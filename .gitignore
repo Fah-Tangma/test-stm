@@ -1,3 +1,6 @@
-.streamlit/
 __pycache__/
 .env
+
+# ซ่อนเฉพาะไฟล์รหัสลับ
+secrets.toml
+.streamlit/secrets.toml
