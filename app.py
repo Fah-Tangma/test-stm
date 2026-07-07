@@ -288,11 +288,13 @@ def parse_ktb_pdf(pdf_stream):
         "cash.management@krungthai.com", "www.krungthai.com"
     ]
 
+    tax_keywords = ["ภาษี", "TAX", "WHT", "หักภาษี"]
+
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
-            text = decode_cid(text) # เรียกใช้ฟังก์ชัน decode (ถ้ามี)
+            text = decode_cid(text) 
             lines = text.split('\n')
             last_idx = -1
             
@@ -300,13 +302,12 @@ def parse_ktb_pdf(pdf_stream):
                 line = line.strip()
                 if not line: continue
 
-                # --- 0. ตรวจสอบ Ignore Keywords (ยกเว้นบรรทัดที่เป็นยอดยกมาตัวจริง) ---
-                # เราจะข้าม ignore keywords ทันที ยกเว้นถ้าบรรทัดนั้นมีตัวเลขเงิน (ซึ่งอาจเป็น B/F)
+                # --- 0. ตรวจสอบ Ignore Keywords ---
                 if any(kw in line for kw in ignore_keywords):
-                    if not re.search(r'\d+\.\d{2}', line): # ถ้าไม่มีตัวเลขเงิน ให้ข้ามเลย
+                    if not re.search(r'\d+\.\d{2}', line):
                         continue
 
-                # --- 1. ตรวจสอบ "ยอดยกมา" (Brought Forward) ---
+                # --- 1. ตรวจสอบ "ยอดยกมา" (เพิ่มช่องภาษีเป็น 0.0) ---
                 if any(kw in line for kw in bf_keywords):
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     date_match = re.search(r'(\d{2}/\d{2}/\d{2,4})', line)
@@ -314,8 +315,8 @@ def parse_ktb_pdf(pdf_stream):
                     
                     if amts:
                         balance_val = str_to_float(amts[-1])
-                        # ใช้ Code "B/F" เพื่อการ Filter ภายหลัง
-                        all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา (Balance Brought Forward)", 0.0, balance_val, "-"])
+                        # โครงสร้าง: [วันที่, เวลา, รายการ, รายละเอียด, ถอนเงิน/ฝากเงิน, ภาษี, ยอดคงเหลือ, สาขา]
+                        all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา (Balance Brought Forward)", 0.0, 0.0, balance_val, "-"])
                         last_idx = len(all_raw_rows) - 1
                         continue
 
@@ -326,12 +327,20 @@ def parse_ktb_pdf(pdf_stream):
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
                         val = str_to_float(amts[0])
-                        f_amt = val if ('DT' in c or 'CR' in c) else -val
                         balance_val = str_to_float(amts[-1])
                         detail = rem.split(amts[0])[0].strip()
                         branch = rem.split(amts[-1])[-1].strip() or "Krungthai Business"
                         
-                        all_raw_rows.append([d, t, c, detail, f_amt, balance_val, branch])
+                        # แยกภาษี
+                        is_tax = any(kw in (c + detail).upper() for kw in tax_keywords)
+                        if is_tax:
+                            f_amt = 0.0
+                            tax_amt = -val # ภาษีมักเป็นยอดจ่าย/หักออก
+                        else:
+                            f_amt = val if ('DT' in c or 'CR' in c) else -val
+                            tax_amt = 0.0
+                        
+                        all_raw_rows.append([d, t, c, detail, f_amt, tax_amt, balance_val, branch])
                         last_idx = len(all_raw_rows) - 1
                     continue
 
@@ -342,25 +351,33 @@ def parse_ktb_pdf(pdf_stream):
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
                         raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
-                        f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
                         balance_val = str_to_float(amts[-1])
                         detail = rem.split(amts[0])[0].strip()
                         branch = line.split()[-1]
 
-                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
+                        # แยกภาษี
+                        is_tax = any(kw in (name + c + detail).upper() for kw in tax_keywords)
+                        if is_tax:
+                            f_amt = 0.0
+                            tax_amt = -raw
+                        else:
+                            f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
+                            tax_amt = 0.0
+
+                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, tax_amt, balance_val, branch])
                         last_idx = len(all_raw_rows) - 1
                         continue
 
-                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (แถวว่างจำนวนเงิน) ---
+                # --- 4. รายละเอียดเพิ่มเติม (เพิ่มช่องภาษีเป็น None เพื่อให้ List มีความยาวเท่ากัน) ---
                 time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
                 if time_row_match and last_idx != -1:
                     all_raw_rows[last_idx][1] = time_row_match.group(1)
                     if time_row_match.group(2):
                         all_raw_rows[last_idx][3] += " " + time_row_match.group(2).strip()
                 elif last_idx != -1:
-                    # ถ้าไม่ใช่บรรทัดขึ้นต้นด้วยวันที่ใหม่ ให้ถือเป็นแถวรายละเอียด (Amount เป็น None)
                     if not re.match(r'^\d{2}/\d{2}/', line):
-                        all_raw_rows.append(["", "", "", line, None, None, ""])
+                        # เพิ่มค่าให้ครบ 8 คอลัมน์ (ใส่ None ในช่องเงินและภาษี)
+                        all_raw_rows.append(["", "", "", line, None, None, None, ""])
 
     # ================= 5. Filtering Process (ลบยอดยกมาซ้ำ และ ลบแถวว่าง > 1) =================
 
@@ -457,7 +474,7 @@ if convert_button:
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         elif bank_option == "กรุงไทย (KTB)":
                             rows = parse_ktb_pdf(unlocked_io)
-                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "สาขา"])
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ภาษี", "ยอดคงเหลือ", "สาขา"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         all_dfs.append(df)
 
