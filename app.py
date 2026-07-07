@@ -273,7 +273,6 @@ def parse_scb_pdf(pdf_stream):
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
     all_raw_rows = []
-    # รายการที่เป็น "เงินเข้า" (อ้างอิงจากรูป: PBSDT, IIPS คือเงินเข้า)
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP', 'PBSDT']
     bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
 
@@ -310,56 +309,72 @@ def parse_ktb_pdf(pdf_stream):
                     d_val = date_match.group(1) if date_match else ""
                     if amts:
                         balance_val = str_to_float(amts[-1])
-                        # [Date, Time, Code, Detail, Amount, Tax, Balance, Branch]
                         all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา", 0.0, 0.0, balance_val, "-"])
                         last_idx = len(all_raw_rows) - 1
                         continue
 
-                # --- 2. รูปแบบรายการหลัก (Biz & General) ---
-                match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s*(\d{2}:\d{2})?\s*([A-Z0-9]+)\s+(.*)', line)
-                if match:
-                    d, t, c, rem = match.groups()
+                # --- 2. รูปแบบ Biz Format (ปี ค.ศ. YYYY เช่น 30/06/2026) ---
+                biz_match = re.match(r'^(\d{2}/\d{2}/\d{4})\s*(\d{2}:\d{2})?\s*([A-Z0-9]+)\s+(.*)', line)
+                if biz_match:
+                    d, t, c, rem = biz_match.groups()
                     t = t if t else ""
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     
                     f_amt, tax_amt, balance_val = 0.0, 0.0, 0.0
                     if len(amts) >= 3:
-                        # กรณีมีภาษี: [Amount, Tax, Balance]
+                        # Biz Format: ตัวเลข 3 ชุดคือ [จำนวนเงิน, ภาษี, ยอดคงเหลือ]
                         val_raw = str_to_float(amts[0])
                         tax_amt = str_to_float(amts[1])
                         balance_val = str_to_float(amts[-1])
                         f_amt = val_raw if any(dc in c for dc in deposit_codes) else -val_raw
                     elif len(amts) == 2:
-                        # กรณีไม่มีภาษี: [Amount, Balance]
                         val_raw = str_to_float(amts[0])
                         balance_val = str_to_float(amts[-1])
                         tax_amt = 0.0
                         f_amt = val_raw if any(dc in c for dc in deposit_codes) else -val_raw
                     
                     detail = rem.split(amts[0])[0].strip() if amts else rem
-                    branch = rem.split(amts[-1])[-1].strip() if amts else "-"
+                    branch = rem.split(amts[-1])[-1].strip() if amts else "Krungthai Business"
                     
                     all_raw_rows.append([d, t, c, detail, f_amt, tax_amt, balance_val, branch])
                     last_idx = len(all_raw_rows) - 1
                     continue
                     
-                # --- 3. รูปแบบ Personal (YY) ---
+                # --- 3. รูปแบบ Personal Format (ปี พ.ศ./ค.ศ. YY เช่น 30/06/26) ---
                 pers_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
                 if pers_match:
                     d, name, c, rem = pers_match.groups()
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
-                    if len(amts) >= 2:
-                        raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
+                    
+                    f_amt, tax_amt, balance_val = 0.0, 0.0, 0.0
+                    if len(amts) >= 3:
+                        # Personal Format: ตัวเลข 3 ชุดคือ [ถอนเงิน, ฝากเงิน, ยอดคงเหลือ]
+                        w_amt = str_to_float(amts[0])
+                        d_amt = str_to_float(amts[1])
                         balance_val = str_to_float(amts[-1])
-                        tax_amt = str_to_float(amts[1]) if len(amts) >= 3 else 0.0
+                        
+                        if d_amt > 0 and w_amt == 0:
+                            f_amt = d_amt
+                        elif w_amt > 0:
+                            f_amt = -w_amt
+                        else:
+                            f_amt = d_amt if d_amt > 0 else -w_amt
+                    elif len(amts) == 2:
+                        raw = str_to_float(amts[0])
+                        balance_val = str_to_float(amts[-1])
                         f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
-                        detail = rem.split(amts[0])[0].strip()
-                        branch = line.split()[-1]
-                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, tax_amt, balance_val, branch])
-                        last_idx = len(all_raw_rows) - 1
-                        continue
+                    
+                    # บุคคลธรรมดาไม่มีช่องภาษีแยก -> ตั้งภาษีเป็น 0.0 เสมอ
+                    tax_amt = 0.0
+                    
+                    detail = rem.split(amts[0])[0].strip() if amts else rem
+                    branch = line.split()[-1] if line.split() else "Krungthai Personal"
+                    
+                    all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, tax_amt, balance_val, branch])
+                    last_idx = len(all_raw_rows) - 1
+                    continue
 
-                # --- 4. รายละเอียดบรรทัดถัดไป หรือเวลาแยกบรรทัด ---
+                # --- 4. บรรทัดรายละเอียดเพิ่มเติม หรือ เวลา ---
                 time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
                 if time_row_match and last_idx != -1:
                     all_raw_rows[last_idx][1] = time_row_match.group(1)
@@ -367,9 +382,8 @@ def parse_ktb_pdf(pdf_stream):
                         all_raw_rows[last_idx][3] += " " + time_row_match.group(2).strip()
                 elif last_idx != -1:
                     if not re.match(r'^\d{2}/\d{2}/', line):
-                        # ใส่ 8 คอลัมน์ โดยให้ช่องตัวเลขเป็น None เพื่อใช้ในการ Merge ภายหลัง
                         all_raw_rows.append(["", "", "", line, None, None, None, ""])
-
+                        
     # ================= 5. Filtering Process (ลบยอดยกมาซ้ำ และ ลบแถวว่าง > 1) =================
 
     # ขั้นตอนที่ 5.1: ลบ "ยอดยกมา" (B/F) ให้เหลือแค่แถวแรกสุดตัวเดียว
