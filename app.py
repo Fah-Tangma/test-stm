@@ -324,7 +324,7 @@ def parse_ktb_pdf(pdf_stream):
                     if len(amts) >= 3:
                         # Biz Format: ตัวเลข 3 ชุดคือ [จำนวนเงิน, ภาษี, ยอดคงเหลือ]
                         val_raw = str_to_float(amts[0])
-                        tax_amt = str_to_float(amts[1])
+                        tax_amt = -abs(str_to_float(amts[1]))
                         balance_val = str_to_float(amts[-1])
                         f_amt = val_raw if any(dc in c for dc in deposit_codes) else -val_raw
                     elif len(amts) == 2:
