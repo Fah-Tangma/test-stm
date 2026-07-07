@@ -273,7 +273,7 @@ def parse_scb_pdf(pdf_stream):
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
     all_raw_rows = []
-    deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP', 'PBSDT']
+    deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP', 'PBSDT', 'NBSDT']
     bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
 
     ignore_keywords = [
