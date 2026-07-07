@@ -288,7 +288,7 @@ def parse_ktb_pdf(pdf_stream):
         "cash.management@krungthai.com", "www.krungthai.com"
     ]
 
-    tax_keywords = ["ภาษี", "TAX", "WHT", "หักภาษี"]
+    tax_keywords = ["ภาษี", "TAX", "WHT", "หักภาษี", "IIPS"]
 
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
