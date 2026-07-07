@@ -273,9 +273,8 @@ def parse_scb_pdf(pdf_stream):
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
     all_raw_rows = []
-    # รายการที่เป็น "เงินเข้า" (เพิ่ม PBSDT และ IIPS ตามรูป)
+    # รายการที่เป็น "เงินเข้า" (อ้างอิงจากรูป: PBSDT, IIPS คือเงินเข้า)
     deposit_codes = ['IORSDT', 'IIPS', 'DDSDT', 'CR', 'OTHDEP', 'PBSDT']
-    # คำหลักสำหรับยอดยกมา
     bf_keywords = ["ยอดยกมา", "ยอดคงเหลือยกมา", "Balance Brought Forward", "Brought Forward"]
 
     ignore_keywords = [
@@ -304,79 +303,72 @@ def parse_ktb_pdf(pdf_stream):
                 if any(kw in line for kw in ignore_keywords) and not re.search(r'\d+\.\d{2}', line):
                     continue
 
-                # --- 1. ตรวจสอบ "ยอดยกมา" ---
+                # --- 1. ตรวจสอบ "ยอดยกมา" (B/F) ---
                 if any(kw in line for kw in bf_keywords):
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     date_match = re.search(r'(\d{2}/\d{2}/\d{2,4})', line)
                     d_val = date_match.group(1) if date_match else ""
                     if amts:
-                        all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา", 0.0, 0.0, str_to_float(amts[-1]), "-"])
+                        balance_val = str_to_float(amts[-1])
+                        # [Date, Time, Code, Detail, Amount, Tax, Balance, Branch]
+                        all_raw_rows.append([d_val, "", "B/F", "ยอดยกมา", 0.0, 0.0, balance_val, "-"])
                         last_idx = len(all_raw_rows) - 1
                         continue
 
-                # --- 2. รูปแบบรายการ (รองรับทั้ง Biz และ Personal) ---
-                # Regex ตรวจจับ: วันที่ เวลา(ถ้ามี) รหัส รายละเอียด...
+                # --- 2. รูปแบบรายการหลัก (Biz & General) ---
                 match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s*(\d{2}:\d{2})?\s*([A-Z0-9]+)\s+(.*)', line)
-                
                 if match:
                     d, t, c, rem = match.groups()
                     t = t if t else ""
-                    
-                    # ค้นหาตัวเลขทั้งหมดในส่วนที่เหลือ (จำนวนเงิน, ภาษี, ยอดคงเหลือ)
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     
                     f_amt, tax_amt, balance_val = 0.0, 0.0, 0.0
-
                     if len(amts) >= 3:
-                        # กรณี Business: [จำนวนเงิน, ภาษี, ยอดคงเหลือ]
+                        # กรณีมีภาษี: [Amount, Tax, Balance]
                         val_raw = str_to_float(amts[0])
                         tax_amt = str_to_float(amts[1])
                         balance_val = str_to_float(amts[-1])
                         f_amt = val_raw if any(dc in c for dc in deposit_codes) else -val_raw
                     elif len(amts) == 2:
-                        # กรณีทั่วไป: [จำนวนเงิน, ยอดคงเหลือ]
+                        # กรณีไม่มีภาษี: [Amount, Balance]
                         val_raw = str_to_float(amts[0])
-                        tax_amt = 0.0
                         balance_val = str_to_float(amts[-1])
+                        tax_amt = 0.0
                         f_amt = val_raw if any(dc in c for dc in deposit_codes) else -val_raw
                     
-                    # แยกรายละเอียด (ข้อความก่อนเจอตัวเลขชุดแรก)
                     detail = rem.split(amts[0])[0].strip() if amts else rem
-                    # แยกช่องทาง/สาขา (ข้อความหลังยอดคงเหลือ)
                     branch = rem.split(amts[-1])[-1].strip() if amts else "-"
                     
                     all_raw_rows.append([d, t, c, detail, f_amt, tax_amt, balance_val, branch])
                     last_idx = len(all_raw_rows) - 1
                     continue
                     
-                # --- 3. รูปแบบ Personal Format (YY) ---
-                main_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
-                if main_match:
-                    d, name, c, rem = main_match.groups()
+                # --- 3. รูปแบบ Personal (YY) ---
+                pers_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
+                if pers_match:
+                    d, name, c, rem = pers_match.groups()
                     amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
                     if len(amts) >= 2:
                         raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
-                        f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
                         balance_val = str_to_float(amts[-1])
+                        tax_amt = str_to_float(amts[1]) if len(amts) >= 3 else 0.0
+                        f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
                         detail = rem.split(amts[0])[0].strip()
                         branch = line.split()[-1]
-
-                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
+                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, tax_amt, balance_val, branch])
                         last_idx = len(all_raw_rows) - 1
                         continue
 
-                                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (แถวว่างจำนวนเงิน) ---
+                # --- 4. รายละเอียดบรรทัดถัดไป หรือเวลาแยกบรรทัด ---
                 time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
                 if time_row_match and last_idx != -1:
                     all_raw_rows[last_idx][1] = time_row_match.group(1)
                     if time_row_match.group(2):
                         all_raw_rows[last_idx][3] += " " + time_row_match.group(2).strip()
                 elif last_idx != -1:
-                    
-
-                # --- 3. รายละเอียดเพิ่มเติมบรรทัดถัดไป ---
-                if last_idx != -1 and not re.match(r'^\d{2}/\d{2}/', line):
-                    all_raw_rows.append(["", "", "", line, None, None, None, ""])
+                    if not re.match(r'^\d{2}/\d{2}/', line):
+                        # ใส่ 8 คอลัมน์ โดยให้ช่องตัวเลขเป็น None เพื่อใช้ในการ Merge ภายหลัง
+                        all_raw_rows.append(["", "", "", line, None, None, None, ""])
 
     # ================= 5. Filtering Process (ลบยอดยกมาซ้ำ และ ลบแถวว่าง > 1) =================
 
