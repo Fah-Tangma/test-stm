@@ -348,6 +348,31 @@ def parse_ktb_pdf(pdf_stream):
                     all_raw_rows.append([d, t, c, detail, f_amt, tax_amt, balance_val, branch])
                     last_idx = len(all_raw_rows) - 1
                     continue
+                    
+                # --- 3. รูปแบบ Personal Format (YY) ---
+                main_match = re.match(r'^(\d{2}/\d{2}/\d{2})\s*(.*?)\s*\(([A-Z]+)\)\s*(.*)', line)
+                if main_match:
+                    d, name, c, rem = main_match.groups()
+                    amts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', rem)
+                    if len(amts) >= 2:
+                        raw = str_to_float(amts[1]) if len(amts) >= 3 and str_to_float(amts[0]) == 0 else str_to_float(amts[0])
+                        f_amt = raw if (c in deposit_codes or "เข้า" in name) else -raw
+                        balance_val = str_to_float(amts[-1])
+                        detail = rem.split(amts[0])[0].strip()
+                        branch = line.split()[-1]
+
+                        all_raw_rows.append([d, "", f"{name} ({c})", detail, f_amt, balance_val, branch])
+                        last_idx = len(all_raw_rows) - 1
+                        continue
+
+                                # --- 4. บรรทัดเวลา หรือ รายละเอียดเพิ่มเติม (แถวว่างจำนวนเงิน) ---
+                time_row_match = re.match(r'^(\d{2}:\d{2})(.*)', line)
+                if time_row_match and last_idx != -1:
+                    all_raw_rows[last_idx][1] = time_row_match.group(1)
+                    if time_row_match.group(2):
+                        all_raw_rows[last_idx][3] += " " + time_row_match.group(2).strip()
+                elif last_idx != -1:
+                    
 
                 # --- 3. รายละเอียดเพิ่มเติมบรรทัดถัดไป ---
                 if last_idx != -1 and not re.match(r'^\d{2}/\d{2}/', line):
