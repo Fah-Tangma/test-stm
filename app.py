@@ -111,103 +111,103 @@ def parse_kbank_pdf(pdf_stream):
     table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ","ทำรายการ (บาท)"]
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
-        for page in pdf_obj.pages:
-            text = page.extract_text()
-            if not text: continue
-            lines = text.split('\n')
-            is_in_table = False 
+    for page in pdf_obj.pages:
+        text = page.extract_text()
+        if not text: continue
+        lines = text.split('\n')
+        is_in_table = False 
 
-            for line in lines:
-                line = line.strip()
-                if not line: continue
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            
+            # --- 1. เช็ค Pattern วันที่ก่อน (ถ้าเจอวันที่ แสดงว่าเป็นข้อมูลธุรกรรมแน่นอน ไม่ใช่หัวตาราง) ---
+            date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
+            
+            if date_match:
+                is_in_table = True 
+                date = date_match.group(1)
+                time_match = re.search(r'(\d{2}:\d{2})', line)
+                time = time_match.group(1) if time_match else ""
                 
-                # --- 1. เช็ค Pattern วันที่ก่อน (ถ้าเจอวันที่ แสดงว่าเป็นข้อมูลธุรกรรมแน่นอน ไม่ใช่หัวตาราง) ---
-                date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
+                # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด
+                amounts = re.findall(r'[\d,]+\.\d{2}', line)
                 
-                if date_match:
-                    is_in_table = True 
-                    date = date_match.group(1)
-                    time_match = re.search(r'(\d{2}:\d{2})', line)
-                    time = time_match.group(1) if time_match else ""
-                    
-                    # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด
-                    amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                    
-                    temp_text = line.replace(date, "", 1).strip()
-                    if time: temp_text = temp_text.replace(time, "", 1).strip()
-                    
-                    # แยก Description: ตัดข้อความก่อนเจอตัวเลขชุดแรก
-                    desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
-                    
-                    amount_val, balance = None, None
-                    if len(amounts) == 1:
-                        balance = str_to_float(amounts[0])
-                    elif len(amounts) >= 2:
-                        # แยกฝั่งเงินเข้า/ออก: เพิ่ม Keyword ให้ครอบคลุม
-                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
-                        val = str_to_float(amounts[0])
-                        amount_val = val if is_deposit else -val
-                        balance = str_to_float(amounts[-1])
-
-                    remaining = ""
-                    if amounts:
-                        # หาข้อความส่วนที่เหลือหลังยอดคงเหลือ
-                        parts = line.split(amounts[-1])
-                        if len(parts) > 1: remaining = parts[-1].strip()
-                    
-                    chan, det = split_channel_and_detail(remaining)
-                    all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
-                    continue # เมื่อเจอข้อมูลแล้ว ให้ข้ามไปบรรทัดถัดไปทันที (ไม่ลงไปเช็ค Header ด้านล่าง)
-
-                # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ (ถ้าไม่มีวันที่) ---
-                if any(kw in line for kw in table_headers):
-                    is_in_table = True
-                    continue
+                temp_text = line.replace(date, "", 1).strip()
+                if time: temp_text = temp_text.replace(time, "", 1).strip()
                 
-                # --- 3. เช็คบรรทัดจบรายการ ---
-                if any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
-                    is_in_table = False
-                    continue
+                # แยก Description: ตัดข้อความก่อนเจอตัวเลขชุดแรก
+                desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
+                
+                amount_val, balance = None, None
+                if len(amounts) == 1:
+                    balance = str_to_float(amounts[0])
+                elif len(amounts) >= 2:
+                    # แยกฝั่งเงินเข้า/ออก: เพิ่ม Keyword ให้ครอบคลุม
+                    is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
+                    val = str_to_float(amounts[0])
+                    amount_val = val if is_deposit else -val
+                    balance = str_to_float(amounts[-1])
 
-                # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ไม่มีวันที่ แต่อยู่ในตาราง) ---
-                if is_in_table:
-                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
-                    c_extra, d_extra = split_channel_and_detail(line)
-                    all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
+                remaining = ""
+                if amounts:
+                    # หาข้อความส่วนที่เหลือหลังยอดคงเหลือ
+                    parts = line.split(amounts[-1])
+                    if len(parts) > 1: remaining = parts[-1].strip()
+                
+                chan, det = split_channel_and_detail(remaining)
+                all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
+                continue # เมื่อเจอข้อมูลแล้ว ให้ข้ามไปบรรทัดถัดไปทันที (ไม่ลงไปเช็ค Header ด้านล่าง)
 
-   # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
-temp_list_bf = []
-found_first_bf = False
-for row in all_parsed_rows:
-    is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
-    if is_bf_row:
-        if not found_first_bf:
-            temp_list_bf.append(row)
-            found_first_bf = True
-    else:
-        temp_list_bf.append(row)
+            # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ (ถ้าไม่มีวันที่) ---
+            if any(kw in line for kw in table_headers):
+                is_in_table = True
+                continue
+            
+            # --- 3. เช็คบรรทัดจบรายการ ---
+            if any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
+                is_in_table = False
+                continue
 
-final_filtered_rows = []
-i, n = 0, len(temp_list_bf)
-while i < n:
-    if temp_list_bf[i][3] is not None:
-        final_filtered_rows.append(temp_list_bf[i])
-        i += 1
-    else:
-        empty_block = []
-        while i < n and temp_list_bf[i][3] is None:
-            # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
-            if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
+            # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ไม่มีวันที่ แต่อยู่ในตาราง) ---
+            if is_in_table:
+                if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
+                c_extra, d_extra = split_channel_and_detail(line)
+                all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
+
+        # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
+        temp_list_bf = []
+        found_first_bf = False
+        for row in all_parsed_rows:
+            is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
+            if is_bf_row:
+                if not found_first_bf:
+                    temp_list_bf.append(row)
+                    found_first_bf = True
+            else:
+                temp_list_bf.append(row)
+        
+        final_filtered_rows = []
+        i, n = 0, len(temp_list_bf)
+        while i < n:
+            if temp_list_bf[i][3] is not None:
                 final_filtered_rows.append(temp_list_bf[i])
                 i += 1
-                continue
-            empty_block.append(temp_list_bf[i])
-            i += 1
-        # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
-        for item in empty_block:
-            final_filtered_rows.append(item)
-        
-return final_filtered_rows
+            else:
+                empty_block = []
+                while i < n and temp_list_bf[i][3] is None:
+                    # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
+                    if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
+                        final_filtered_rows.append(temp_list_bf[i])
+                        i += 1
+                        continue
+                    empty_block.append(temp_list_bf[i])
+                    i += 1
+                # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
+                for item in empty_block:
+                    final_filtered_rows.append(item)
+                
+        return final_filtered_rows
 
 # ===== 2.SCB =====
 def str_to_float(val):
