@@ -210,9 +210,6 @@ def parse_kbank_pdf(pdf_stream):
     return final_filtered_rows
 
 # ===== 2.SCB =====
-import pdfplumber
-import re
-
 def str_to_float(val):
     if not val or not isinstance(val, str): return 0.0
     return float(val.replace(',', ''))
@@ -240,7 +237,8 @@ def parse_scb_pdf(pdf_stream):
         "กรุณาติดต่อศูนย์บริการลูกค้าธุรกิจ", "02-722-2222", "Contact Center",
         "computer-generated", "authorized person", "signature of SCB",
         "หน้าที่", "Page", "เอกสารฉบับนี้", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป", "ธนาคารไทยพาณิชย์", "จำกัด", "(มหาชน)"
+        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป", "ธนาคารไทยพาณิชย์", "จำกัด", "(มหาชน)", "จำนวนเงินนำเข้าบัญชีทั้งหมด", 
+        "Total Credit Amount", "จำนวนเงินที่หักบัญชีทั้งหมด", "Total Debit Amount"
     ]
 
     with pdfplumber.open(pdf_stream) as pdf:
@@ -327,8 +325,24 @@ def parse_scb_pdf(pdf_stream):
                     else:
                         # กรณีเป็นข้อความรายละเอียดทั่วไป ให้ต่อท้ายรายการล่าสุด
                         all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line_clean).strip()
-                        
-    return all_parsed_rows
+
+            # --- ขั้นตอนสุดท้าย: Clean up ข้อมูล (Post-processing) ---
+    final_output = []
+    for row in all_parsed_rows:
+        # 1. กรองคำใน ignore_keywords ออกจาก Description อีกครั้งเพื่อความสะอาด
+        clean_desc = row[6]
+        for kw in ignore_keywords:
+            clean_desc = clean_desc.replace(kw, "")
+        row[6] = clean_desc.strip()
+
+        # 2. เก็บเฉพาะแถวที่มีตัวเลข หรือเป็น B/F และไม่มีข้อความขยะ
+        if row[4] != 0.0 or row[2] == "B/F":
+            final_output.append(row)
+        elif len(row[6]) > 2: # ถ้าไม่มีเงินแต่มีรายละเอียดเหลืออยู่ (และยาวพอ) ให้เอาไปแปะแถวบน
+            if final_output:
+                final_output[-1][6] = (final_output[-1][6] + " " + row[6]).strip()
+
+    return final_output
 
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
