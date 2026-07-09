@@ -86,22 +86,6 @@ def decode_cid(text):
         text = text.replace(cid, val)
     return text
 
-def split_channel_and_detail(text):
-    channels = [
-        "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
-        "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
-        "BRANCH", "K-Cash Connect Plus" , "Internet/Mobile GSB", "Internet/Mobile SCB", 
-        "Internet/Mobile KTB ", "Internet/Mobile TTB", "ตู้เติมเงิน / โมบาย แอปพลิชัน", "Internet/Mobile BAY", 
-        "Internet/Mobile BBL","Internet/Mobile BAAC", "สาขาถนนศรีสุริยวงศ์", "สาขาเซ็นทรัล ขอนแก่น"
-    ]
-    found_channel, detail_part = "-", text
-    for c in channels:
-        if c in text:
-            found_channel = c
-            detail_part = text.replace(c, "").strip()
-            break
-    return found_channel, detail_part
-
 # ================= 2. Logic สำหรับ KBank / SCB / KTB (คงเดิม) =================
 # ===== 1.KBank =====
 def str_to_float(val):
@@ -118,7 +102,13 @@ def split_channel_and_detail(text):
     แยกข้อความระหว่าง 'ช่องทาง' และ 'รายละเอียด' 
     (KBank มักมีคีย์เวิร์ดเฉพาะในช่องทาง)
     """
-    channels = ["ตู้เติมเงิน", "โมบาย แอปพลิเคชัน", "เงินโอน", "ATM", "K-ATM", "K-BIZ", "K-Cyber"]
+    channels = [
+        "EDC/K SHOP/MYQR", "โอนเข้า/หักบัญชีอัตโนมัติ", "K PLUS", "ตู้เติมเงิน / โมบาย แอปพลิ", 
+        "Internet/Mobile KK", "K BIZ", "EDC", "โอนเข้าหักบัญชีอัตโนมัติ", "ATM", "CDM", 
+        "BRANCH", "K-Cash Connect Plus" , "Internet/Mobile GSB", "Internet/Mobile SCB", 
+        "Internet/Mobile KTB ", "Internet/Mobile TTB", "ตู้เติมเงิน / โมบาย แอปพลิชัน", "Internet/Mobile BAY", 
+        "Internet/Mobile BBL","Internet/Mobile BAAC", "สาขาถนนศรีสุริยวงศ์", "สาขาเซ็นทรัล ขอนแก่น"
+    ]
     found_chan = "-"
     detail = text.strip()
 
@@ -273,10 +263,6 @@ def parse_kbank_pdf(pdf_stream):
             
     return final_filtered_rows
 
-# --- ตัวอย่างการใช้งาน ---
-# result = parse_kbank_pdf("path_to_your_file.pdf")
-# for r in result:
-#     print(r)
 
 # ===== 2.SCB =====
 def str_to_float(val):
