@@ -104,62 +104,100 @@ def split_channel_and_detail(text):
 
 # ================= 2. Logic สำหรับ KBank / SCB / KTB (คงเดิม) =================
 # ===== 1.KBank =====
+def str_to_float(val):
+    """แปลงข้อความจำนวนเงิน (เช่น 1,234.56) ให้เป็น float"""
+    if not val:
+        return 0.0
+    try:
+        return float(str(val).replace(',', ''))
+    except:
+        return 0.0
+
+def split_channel_and_detail(text):
+    """
+    แยกข้อความระหว่าง 'ช่องทาง' และ 'รายละเอียด' 
+    (KBank มักมีคีย์เวิร์ดเฉพาะในช่องทาง)
+    """
+    channels = ["ตู้เติมเงิน", "โมบาย แอปพลิเคชัน", "เงินโอน", "ATM", "K-ATM", "K-BIZ", "K-Cyber"]
+    found_chan = "-"
+    detail = text.strip()
+
+    for c in channels:
+        if c in text:
+            found_chan = c
+            # แยกรายละเอียดที่เหลือหลังจากตัดชื่อช่องทางออก
+            detail = text.replace(c, "").strip()
+            # ลบเครื่องหมาย / ที่อาจหลงเหลือ
+            detail = detail.lstrip('/ ').strip()
+            break
+            
+    return found_chan, detail
+
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
-    # ปรับ table_headers ให้เป็นคำที่เฉพาะเจาะจงขึ้น เพื่อไม่ให้ชนกับรายการ "ถอนเงินสด"
-    table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ","ทำรายการ (บาท)"]
+    # หัวตารางเพื่อใช้เช็คขอบเขตข้อมูล
+    table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ", "ทำรายการ (บาท)"]
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
             text = page.extract_text()
-            if not text: continue
+            if not text: 
+                continue
+            
             lines = text.split('\n')
             is_in_table = False 
 
             for line in lines:
                 line = line.strip()
-                if not line: continue
+                if not line: 
+                    continue
                 
-                # --- 1. เช็ค Pattern วันที่ก่อน (ถ้าเจอวันที่ แสดงว่าเป็นข้อมูลธุรกรรมแน่นอน ไม่ใช่หัวตาราง) ---
+                # --- 1. เช็ค Pattern วันที่ (ถ้าเจอวันที่ = เป็นแถวรายการใหม่) ---
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
                 
                 if date_match:
                     is_in_table = True 
                     date = date_match.group(1)
+                    
+                    # หาเวลา (HH:MM)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     
-                    # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด
+                    # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด (เช่น 1,000.00)
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     
+                    # ตัดเอาเฉพาะส่วนที่เป็น Description (ข้อความก่อนเจอตัวเลขชุดแรก)
                     temp_text = line.replace(date, "", 1).strip()
-                    if time: temp_text = temp_text.replace(time, "", 1).strip()
+                    if time: 
+                        temp_text = temp_text.replace(time, "", 1).strip()
                     
-                    # แยก Description: ตัดข้อความก่อนเจอตัวเลขชุดแรก
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
                     
                     amount_val, balance = None, None
                     if len(amounts) == 1:
+                        # ถ้ามีตัวเลขเดียว มักจะเป็นยอดคงเหลือ (เช่นในบรรทัด 'ยอดยกมา')
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
-                        # แยกฝั่งเงินเข้า/ออก: เพิ่ม Keyword ให้ครอบคลุม
-                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
+                        # แยกฝั่งเงินเข้า/ออก โดยดูจากคำสำคัญใน Description
+                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน", "รับโอน"])
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
+                        # ตัวเลขสุดท้ายคือยอดคงเหลือเสมอ
                         balance = str_to_float(amounts[-1])
 
+                    # หาข้อความที่เหลือหลังยอดคงเหลือ (มักจะเป็นช่องทาง/รายละเอียดเพิ่มเติม)
                     remaining = ""
                     if amounts:
-                        # หาข้อความส่วนที่เหลือหลังยอดคงเหลือ
                         parts = line.split(amounts[-1])
-                        if len(parts) > 1: remaining = parts[-1].strip()
+                        if len(parts) > 1: 
+                            remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
-                    continue # เมื่อเจอข้อมูลแล้ว ให้ข้ามไปบรรทัดถัดไปทันที (ไม่ลงไปเช็ค Header ด้านล่าง)
+                    continue 
 
-                # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ (ถ้าไม่มีวันที่) ---
+                # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ ---
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
@@ -171,59 +209,74 @@ def parse_kbank_pdf(pdf_stream):
 
                 # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ไม่มีวันที่ แต่อยู่ในตาราง) ---
                 if is_in_table:
-                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
+                    # ข้ามบรรทัดที่เป็นหัวกระดาษซ้ำซ้อน
+                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): 
+                        continue
+                    
+                    # ถ้าเป็นบรรทัด "รวมเงิน" ต่างๆ ที่ไม่มีวันที่ ให้ข้ามไป
+                    if any(kw in line for kw in ["รวมถอนเงิน", "รวมฝากเงิน"]):
+                        continue
+
                     c_extra, d_extra = split_channel_and_detail(line)
+                    # เก็บไว้ในรูปแบบแถวเสริม (วันที่/เวลา/จำนวนเงิน เป็นค่าว่าง)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
     # =========================================================
-    # ส่วนของการกรองข้อมูล (Filtering)
+    # ส่วนของการกรองข้อมูล (Filtering) - ปรับปรุงเพื่อไม่ให้ "ยอดยกมา" หาย
     # =========================================================
     
     rows_to_delete = set()
     n = len(all_parsed_rows)
 
-    # --- เงื่อนไขที่ 1: ยอดยกมาเหลือไว้แค่แถวที่ 2 ---
-    bf_indices = []
-    for idx, row in enumerate(all_parsed_rows):
-        description = str(row[2])
-        if any(kw in description for kw in bf_keywords):
-            bf_indices.append(idx)
+    # --- เงื่อนไขที่ 1: จัดการรายการ "ยอดยกมา" (Brought Forward) ---
+    bf_indices = [idx for idx, row in enumerate(all_parsed_rows) if any(kw in str(row[2]) for kw in bf_keywords)]
     
-    if len(bf_indices) >= 2:
-        keep_idx = bf_indices[1] # เก็บตัวที่ 2 (index 1)
+    if bf_indices:
+        keep_idx = None
+        # พยายามหาแถว "ยอดยกมา" ที่มีวันที่ (เพราะคือแถวที่อยู่ในตาราง)
+        for idx in bf_indices:
+            if all_parsed_rows[idx][0]: # index 0 คือ วันที่
+                keep_idx = idx
+                break
+        
+        # ถ้าหาแถวที่มีวันที่ไม่เจอเลย ให้เก็บแถวแรกที่เจอไว้
+        if keep_idx is None:
+            keep_idx = bf_indices[0]
+            
+        # สั่งลบแถว "ยอดยกมา" อื่นๆ ที่ไม่ใช่แถวที่เราเลือกจะเก็บ
         for idx in bf_indices:
             if idx != keep_idx:
                 rows_to_delete.add(idx)
-    elif len(bf_indices) == 1:
-        # ถ้ามีแค่แถวเดียวแต่ต้องการ "แถวที่ 2" แถวที่ 1 นี้ก็ต้องลบ
-        rows_to_delete.add(bf_indices[0])
 
-    # --- เงื่อนไขที่ 2: ลบกลุ่มที่ไม่มีจำนวนเงินติดกันมากกว่า 1 แถว ---
+    # --- เงื่อนไขที่ 2: ลบกลุ่มแถวว่างที่ติดกันเกินไป (Noise) ---
     i = 0
     while i < n:
-        # ตรวจสอบว่าช่อง Amount (index 3) เป็น None หรือไม่
-        if all_parsed_rows[i][3] is None:
+        # ตรวจสอบว่าเป็นแถวที่ไม่มีข้อมูลสำคัญ (วันที่ และ จำนวนเงิน)
+        if all_parsed_rows[i][0] == "" and all_parsed_rows[i][3] is None:
             start_block = i
-            # วิ่งวนเพื่อหาว่ามันติดกันกี่แถว
-            while i < n and all_parsed_rows[i][3] is None:
+            while i < n and all_parsed_rows[i][0] == "" and all_parsed_rows[i][3] is None:
                 i += 1
             end_block = i
             
-            # ถ้ากลุ่มนี้มีจำนวนแถวมากกว่า 1 แถว ให้ลบทิ้งทั้งหมดในกลุ่มนั้น
-            if (end_block - start_block) > 1:
+            # หากเป็นแถวว่างติดกันเกิน 3 แถว สันนิษฐานว่าเป็นขยะจากหัว/ท้ายกระดาษ
+            if (end_block - start_block) > 3:
                 for k in range(start_block, end_block):
                     rows_to_delete.add(k)
         else:
             i += 1
 
-    # สร้างข้อมูลชุดสุดท้ายโดยข้าม index ที่สั่งลบ
+    # สร้างผลลัพธ์สุดท้าย
     final_filtered_rows = [
         row for idx, row in enumerate(all_parsed_rows) 
         if idx not in rows_to_delete
     ]
             
     return final_filtered_rows
+
+# --- ตัวอย่างการใช้งาน ---
+# result = parse_kbank_pdf("path_to_your_file.pdf")
+# for r in result:
+#     print(r)
 
 # ===== 2.SCB =====
 def str_to_float(val):
