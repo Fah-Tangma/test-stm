@@ -262,48 +262,51 @@ def parse_scb_pdf(pdf_stream):
 
                 # 2. เช็คบรรทัดธุรกรรม (มี วันที่ และ เวลา)
                 # รองรับรูปแบบ 01/04/2026 หรือ 01/04/26
-                transaction_match = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 if transaction_match:
-                    in_transaction_zone = True # หน้า 2 ที่ไม่มี B/F จะเริ่มเก็บจากบรรทัดนี้
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
-                    
-                    # ค้นหาจำนวนเงิน (ใช้ 2 ค่าสุดท้ายเสมอ)
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     
-                    # หา Code (ตัวอักษรหลังเวลา)
-                    remaining = line.split(time_str)[-1].strip()
-                    parts = remaining.split()
-                    code = parts[0] if parts else "-"
+                    temp_text = line.replace(date_str, "").replace(time_str, "").strip()
+                    parts = temp_text.split()
+                    code = parts[0] if len(parts) > 0 else "-"
                     channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
-
+                    
+                    # คัดแยกยอดเงิน
                     amount_val, balance_val = 0.0, 0.0
                     if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
-                        amount_val = str_to_float(amounts[-2])
-                        # logic ฝาก/ถอน ตาม Code SCB
-                        if code.upper() not in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'SDP']:
-                            amount_val = -amount_val
+                        raw_amount = str_to_float(amounts[-2])
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'SDP']:
+                            amount_val = raw_amount
+                        else:
+                            amount_val = -raw_amount
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
 
-                    # สร้าง Description
-                    desc = remaining.replace(code, "", 1).replace(channel, "", 1)
-                    for amt in amounts: desc = desc.replace(amt, "")
+                    # ดึงคำอธิบายที่อยู่ในบรรทัดเดียวกัน
+                    line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
+                    if channel != "-": line_desc = line_desc.replace(channel, "", 1)
+                    for amt in amounts: line_desc = line_desc.replace(amt, "")
                     
-                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, desc.strip()])
-                    continue
-
-                # 3. จัดการบรรทัด "รายละเอียดต่อท้าย"
-                if in_transaction_zone and all_parsed_rows:
-                    # ถ้าเจอคำใน ignore_keywords หรือ เจอ "Total/รวม" ให้หยุดอ่านโซนธุรกรรม
-                    if any(ig in line for ig in ignore_keywords) or "Total" in line:
-                        in_transaction_zone = False
-                        continue
+                    # --- จุดที่แก้ไข: เอา pending_desc (ที่อาจจะอ่านมาก่อน) มาต่อด้านหน้า ---
+                    final_desc = (pending_desc + " " + line_desc.strip()).strip()
+                    pending_desc = "" # เคลียร์ค่าทิ้งหลังจากใช้แล้ว
                     
-                    # ถ้าเป็นข้อความรายละเอียด (เช่น AJCHALA CHATAWARAHA ที่หล่นลงมา)
-                    if line and not re.search(r'^\d', line): # บรรทัดรายละเอียดมักไม่ขึ้นต้นด้วยตัวเลข
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, final_desc])
+                
+                elif all_parsed_rows:
+                    # --- จุดที่แก้ไข: เช็คว่าถ้าขึ้นต้นด้วยคำหลักของรายการใหม่ ให้เก็บเข้า pending_desc ---
+                    # ไม่ให้เอาไป append ต่อท้ายบรรทัดที่แล้ว (all_parsed_rows[-1])
+                    description_keywords = ("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม", "ซื้อสินค้า")
+                    
+                    if line.lstrip().startswith(description_keywords):
+                        # เก็บไว้รอบรรทัดวันที่ถัดไป
+                        pending_desc = (pending_desc + " " + line.strip()).strip()
+                    else:
+                        # ถ้าไม่ใช่คำหลัก (เช่น CHATAWARAHA) ให้ถือว่าเป็นส่วนขยายของบรรทัดล่าสุดที่เพิ่งเพิ่มไป
+                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line.strip()).strip()
 
     return all_parsed_rows
 
