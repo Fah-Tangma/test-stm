@@ -210,64 +210,104 @@ def parse_kbank_pdf(pdf_stream):
     return final_filtered_rows
 
 # ===== 2.SCB =====
+import re
+import pdfplumber
+
+def str_to_float(val):
+    if not val: return 0.0
+    try:
+        return float(val.replace(',', ''))
+    except:
+        return 0.0
+
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
-    bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
-    ignore_keywords = [
-        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
-        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
-        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
-        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
-        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",
-        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS", "This document"
+    
+    # 1. รายการคำหรือรูปแบบที่ "ไม่ใช่" รายการธุรกรรมแน่ๆ (ขยะส่วนหัว/ท้าย)
+    # ใช้ Regex ช่วยกรอง เช่น เลขที่บัญชี, หน้าที่, ที่อยู่เลขไปรษณีย์
+    garbage_patterns = [
+        r"ธนาคารไทยพาณิชย์", r"THE SIAM COMMERCIAL", r"เลขที่บัญชี", r"Account No",
+        r"วันที่", r"Date", r"ชื่อ - สกุล", r"Name", r"ที่อยู่", r"Address",
+        r"สาขา", r"SHOPPING COMPLEX", r"ใบแจ้งรายการ", r"STATEMENT OF",
+        r"หน้าที่", r"Page", r"\d{5}$", r"บริษัท", r"จำกัด", r"มหาชน"
     ]
-    pending_desc = ""
+
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text: continue
+            
             lines = text.split('\n')
+            
+            # ตัวแปรควบคุมภายในแต่ละหน้า
+            # เราจะเริ่มเก็บข้อมูลก็ต่อเมื่อเจอ "ยอดยกมา" หรือ "บรรทัดที่มีวันที่/เวลา" เท่านั้น
+            found_first_valid_line_in_page = False 
+
             for line in lines:
                 line = line.strip()
                 if not line: continue
-                if any(kw in line.upper() for kw in bf_keywords):
-                    amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                    if amounts:
-                        balance = str_to_float(amounts[-1])
-                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
-                    continue
-                if any(kw in line for kw in ignore_keywords): continue
+
+                # ตรวจสอบว่าเป็นบรรทัดขยะหรือไม่
+                is_garbage = any(re.search(p, line, re.IGNORECASE) for p in garbage_patterns)
+                
+                # ตรวจสอบรูปแบบธุรกรรม (วันที่ 00/00/00 และ เวลา 00:00)
                 transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                
+                # ตรวจสอบบรรทัดยอดยกมา (B/F)
+                is_bf = any(kw in line.upper() for kw in ["ยอดยกมา", "BALANCE BROUGHT FORWARD"])
+
+                # --- ส่วนตัดสินใจว่าจะอ่านบรรทัดนี้ไหม ---
+                
+                if is_bf:
+                    found_first_valid_line_in_page = True
+                    amounts = re.findall(r'[\d,]+\.\d{2}', line)
+                    balance = str_to_float(amounts[-1]) if amounts else 0.0
+                    all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
+                    continue
+
                 if transaction_match:
+                    found_first_valid_line_in_page = True
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
+                    
+                    # คัดแยกตัวเลข
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
                     temp_text = line.replace(date_str, "").replace(time_str, "").strip()
                     parts = temp_text.split()
+                    
                     code = parts[0] if len(parts) > 0 else "-"
                     channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
+                    
                     amount_val, balance_val = 0.0, 0.0
                     if len(amounts) >= 2:
                         balance_val = str_to_float(amounts[-1])
                         raw_amount = str_to_float(amounts[-2])
-                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR']:
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'SDP']:
                             amount_val = raw_amount
                         else:
                             amount_val = -raw_amount
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
-                    line_desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
-                    if channel != "-": line_desc = line_desc.replace(channel, "", 1)
-                    for amt in amounts: line_desc = line_desc.replace(amt, "")
-                    final_desc = (pending_desc + " " + line_desc.strip()).strip()
-                    pending_desc = ""
-                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, final_desc])
-                elif all_parsed_rows:
-                    if line.startswith(("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม")):
-                        pending_desc = (pending_desc + " " + line).strip()
-                    else:
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+
+                    desc = line.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
+                    if channel != "-": desc = desc.replace(channel, "", 1)
+                    for amt in amounts: desc = desc.replace(amt, "")
+                    
+                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, desc.strip()])
+                    continue
+
+                # --- กรณีเป็นบรรทัดที่ไม่มีวันที่ ---
+                # ถ้าเราเจอรายการไปแล้ว (found_first_valid_line_in_page == True)
+                # และบรรทัดนี้ "ไม่ใช่ขยะ" ให้ถือว่าเป็นคำอธิบาย (Description) เพิ่มเติม
+                if found_first_valid_line_in_page and not is_garbage and all_parsed_rows:
+                    # ป้องกันการเก็บตัวเลขยอดรวมท้ายหน้า (ถ้ามี)
+                    if "Total" in line or "รวม" in line:
+                        found_first_valid_line_in_page = False
+                        continue
+                        
+                    current_desc = all_parsed_rows[-1][6]
+                    all_parsed_rows[-1][6] = (current_desc + " " + line).strip()
+
     return all_parsed_rows
 
 # ===== 3.KTB =====
