@@ -86,8 +86,6 @@ def decode_cid(text):
         text = text.replace(cid, val)
     return text
 
-# ================= 2. Logic สำหรับ KBank / SCB / KTB (คงเดิม) =================
-# ===== 1.KBank =====
 def str_to_float(val):
     """แปลงข้อความจำนวนเงิน (เช่น 1,234.56) ให้เป็น float"""
     if not val:
@@ -123,92 +121,75 @@ def split_channel_and_detail(text):
             
     return found_chan, detail
 
+# ================= 2. Logic สำหรับ KBank / SCB / KTB (คงเดิม) =================
+# ===== 1.KBank =====
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
-    # หัวตารางเพื่อใช้เช็คขอบเขตข้อมูล
     table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ", "ทำรายการ (บาท)"]
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
         for page in pdf_obj.pages:
             text = page.extract_text()
-            if not text: 
-                continue
+            if not text: continue
             
             lines = text.split('\n')
             is_in_table = False 
 
             for line in lines:
                 line = line.strip()
-                if not line: 
-                    continue
+                if not line: continue
                 
-                # --- 1. เช็ค Pattern วันที่ (ถ้าเจอวันที่ = เป็นแถวรายการใหม่) ---
+                # --- 1. เช็ค Pattern วันที่ ---
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
                 
                 if date_match:
                     is_in_table = True 
                     date = date_match.group(1)
-                    
-                    # หาเวลา (HH:MM)
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     
-                    # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด (เช่น 1,000.00)
-                    amounts = re.findall(r'[\d,]+\.\d{2}', line)
+                    # ปรับ Regex: r'-?[\d,]+\.\d{2}' เพื่อให้ดึงเครื่องหมายลบ (-) มาด้วย
+                    amounts = re.findall(r'-?[\d,]+\.\d{2}', line)
                     
-                    # ตัดเอาเฉพาะส่วนที่เป็น Description (ข้อความก่อนเจอตัวเลขชุดแรก)
                     temp_text = line.replace(date, "", 1).strip()
-                    if time: 
-                        temp_text = temp_text.replace(time, "", 1).strip()
+                    if time: temp_text = temp_text.replace(time, "", 1).strip()
                     
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
                     
                     amount_val, balance = None, None
                     if len(amounts) == 1:
-                        # ถ้ามีตัวเลขเดียว มักจะเป็นยอดคงเหลือ (เช่นในบรรทัด 'ยอดยกมา')
+                        # กรณี 'ยอดยกมา' จะมีตัวเลขเดียว ซึ่งคือยอดคงเหลือ (อาจติดลบ)
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
-                        # แยกฝั่งเงินเข้า/ออก โดยดูจากคำสำคัญใน Description
-                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน", "รับโอน"])
+                        # แยกยอดเงินเข้า/ออก
+                        is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน", "รับโอน", "รับเงินจาก"])
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
-                        # ตัวเลขสุดท้ายคือยอดคงเหลือเสมอ
+                        # ยอดคงเหลือคือตัวเลขชุดสุดท้ายในบรรทัด (อาจติดลบ)
                         balance = str_to_float(amounts[-1])
 
-                    # หาข้อความที่เหลือหลังยอดคงเหลือ (มักจะเป็นช่องทาง/รายละเอียดเพิ่มเติม)
                     remaining = ""
                     if amounts:
                         parts = line.split(amounts[-1])
-                        if len(parts) > 1: 
-                            remaining = parts[-1].strip()
+                        if len(parts) > 1: remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
                     continue 
 
-                # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ ---
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
                 
-                # --- 3. เช็คบรรทัดจบรายการ ---
                 if any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
-                # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ไม่มีวันที่ แต่อยู่ในตาราง) ---
                 if is_in_table:
-                    # ข้ามบรรทัดที่เป็นหัวกระดาษซ้ำซ้อน
-                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): 
+                    if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ", "รวมถอนเงิน", "รวมฝากเงิน"]): 
                         continue
-                    
-                    # ถ้าเป็นบรรทัด "รวมเงิน" ต่างๆ ที่ไม่มีวันที่ ให้ข้ามไป
-                    if any(kw in line for kw in ["รวมถอนเงิน", "รวมฝากเงิน"]):
-                        continue
-
                     c_extra, d_extra = split_channel_and_detail(line)
-                    # เก็บไว้ในรูปแบบแถวเสริม (วันที่/เวลา/จำนวนเงิน เป็นค่าว่าง)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
     # =========================================================
@@ -262,7 +243,6 @@ def parse_kbank_pdf(pdf_stream):
     ]
             
     return final_filtered_rows
-
 
 # ===== 2.SCB =====
 def str_to_float(val):
