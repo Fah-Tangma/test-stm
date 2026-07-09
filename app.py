@@ -176,37 +176,40 @@ def parse_kbank_pdf(pdf_stream):
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
     # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
+    # ขั้นตอนที่ 5.1: ลบ "ยอดยกมา" (B/F) ให้เหลือแค่แถวแรกสุดตัวเดียว
     temp_list_bf = []
     found_first_bf = False
-    for row in all_parsed_rows:
-        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
-        if is_bf_row:
+    for row in all_raw_rows:
+        if row[2] == "B/F":
             if not found_first_bf:
                 temp_list_bf.append(row)
                 found_first_bf = True
         else:
             temp_list_bf.append(row)
 
+    # ขั้นตอนที่ 5.2: ลบแถวว่าง (Amount is None) ที่ต่อเนื่องกันมากกว่า 1 แถว
     final_filtered_rows = []
     i, n = 0, len(temp_list_bf)
     while i < n:
-        if temp_list_bf[i][3] is not None:
+        # ถ้าแถวนั้นมีจำนวนเงิน หรือเป็นยอดยกมาที่เลือกไว้ ให้เก็บไว้
+        if temp_list_bf[i][4] is not None or temp_list_bf[i][2] == "B/F":
             final_filtered_rows.append(temp_list_bf[i])
             i += 1
         else:
+            # เริ่มตรวจสอบกลุ่มแถวว่าง
             empty_block = []
-            while i < n and temp_list_bf[i][3] is None:
-                # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
-                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
-                    final_filtered_rows.append(temp_list_bf[i])
-                    i += 1
-                    continue
-                empty_block.append(temp_list_bf[i])
+            while i < n and temp_list_bf[i][4] is None and temp_list_bf[i][2] != "B/F":
+                # กรองพวกคำใน ignore_keywords อีกครั้งเพื่อความชัวร์
+                if not any(kw in str(temp_list_bf[i][3]) for kw in ignore_keywords):
+                    empty_block.append(temp_list_bf[i])
                 i += 1
-            # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
-            for item in empty_block:
-                final_filtered_rows.append(item)
             
+            # ถ้ามีแถวว่างแถวเดียว (มักจะเป็นรายละเอียดต่อท้าย) ให้เอาไป Merge กับแถวบน
+            if len(empty_block) == 1:
+                if final_filtered_rows:
+                    final_filtered_rows[-1][3] = (str(final_filtered_rows[-1][3]) + " " + str(empty_block[0][3])).strip()
+            # ถ้ามีมากกว่า 1 แถว ให้ "ลบทิ้งทั้งหมด" (ข้ามไปเลย)
+
     return final_filtered_rows
 
 # ===== 2.SCB =====
