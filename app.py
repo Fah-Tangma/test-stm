@@ -107,7 +107,6 @@ def split_channel_and_detail(text):
 def parse_kbank_pdf(pdf_stream):
     all_parsed_rows = []
     bf_keywords = ["ยอดยกมา", "Balance Brought Forward", "Brought Forward"]
-    # ปรับ table_headers ให้เป็นคำที่เฉพาะเจาะจงขึ้น เพื่อไม่ให้ชนกับรายการ "ถอนเงินสด"
     table_headers = ["เวลา/", "วันที่มีผล", "ถอนเงิน / ฝากเงิน", "ยอดคงเหลือ","ทำรายการ (บาท)"]
 
     with pdfplumber.open(pdf_stream) as pdf_obj:
@@ -121,7 +120,7 @@ def parse_kbank_pdf(pdf_stream):
                 line = line.strip()
                 if not line: continue
                 
-                # --- 1. เช็ค Pattern วันที่ก่อน (ถ้าเจอวันที่ แสดงว่าเป็นข้อมูลธุรกรรมแน่นอน ไม่ใช่หัวตาราง) ---
+                # --- 1. เช็ค Pattern วันที่ ---
                 date_match = re.match(r'^(\d{2}-\d{2}-\d{2})', line)
                 
                 if date_match:
@@ -130,20 +129,16 @@ def parse_kbank_pdf(pdf_stream):
                     time_match = re.search(r'(\d{2}:\d{2})', line)
                     time = time_match.group(1) if time_match else ""
                     
-                    # หาตัวเลขจำนวนเงินทั้งหมดในบรรทัด
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                    
                     temp_text = line.replace(date, "", 1).strip()
                     if time: temp_text = temp_text.replace(time, "", 1).strip()
                     
-                    # แยก Description: ตัดข้อความก่อนเจอตัวเลขชุดแรก
                     desc = temp_text.split(amounts[0])[0].strip() if amounts else temp_text
                     
                     amount_val, balance = None, None
                     if len(amounts) == 1:
                         balance = str_to_float(amounts[0])
                     elif len(amounts) >= 2:
-                        # แยกฝั่งเงินเข้า/ออก: เพิ่ม Keyword ให้ครอบคลุม
                         is_deposit = any(kw in desc for kw in ["รับเงิน", "คืนเงิน", "ฝาก", "เงินคืน", "Thai QR", "รับโอนเงิน"])
                         val = str_to_float(amounts[0])
                         amount_val = val if is_deposit else -val
@@ -151,62 +146,74 @@ def parse_kbank_pdf(pdf_stream):
 
                     remaining = ""
                     if amounts:
-                        # หาข้อความส่วนที่เหลือหลังยอดคงเหลือ
                         parts = line.split(amounts[-1])
                         if len(parts) > 1: remaining = parts[-1].strip()
                     
                     chan, det = split_channel_and_detail(remaining)
                     all_parsed_rows.append([date, time, desc, amount_val, balance, chan, det])
-                    continue # เมื่อเจอข้อมูลแล้ว ให้ข้ามไปบรรทัดถัดไปทันที (ไม่ลงไปเช็ค Header ด้านล่าง)
+                    continue
 
-                # --- 2. เช็คว่าเป็นหัวตารางหรือไม่ (ถ้าไม่มีวันที่) ---
                 if any(kw in line for kw in table_headers):
                     is_in_table = True
                     continue
                 
-                # --- 3. เช็คบรรทัดจบรายการ ---
                 if any(kw in line for kw in ["Total", "รวมทั้งสิ้น", "จบรายการ"]):
                     is_in_table = False
                     continue
 
-                # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ไม่มีวันที่ แต่อยู่ในตาราง) ---
+                # --- 4. บรรทัดรายละเอียดเพิ่มเติม (ยัด line ลงไปใน desc เพื่อให้เช็ค keyword เจอ) ---
                 if is_in_table:
                     if any(x in line for x in ["หน้า", "แผ่นที่", "ยอดคงเหลือ"]): continue
                     c_extra, d_extra = split_channel_and_detail(line)
-                    all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
+                    all_parsed_rows.append(["", "", line, None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
-    temp_list_bf = []
-    found_first_bf = False
-    for row in all_parsed_rows:
-        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
-        if is_bf_row:
-            if not found_first_bf:
-                temp_list_bf.append(row)
-                found_first_bf = True
-        else:
-            temp_list_bf.append(row)
+    # =========================================================
+    # ส่วนการกรองข้อมูลตามเงื่อนไข (อยู่นอก Loop ของ Page)
+    # =========================================================
+    
+    rows_to_delete = set()
+    
+    # 1. เงื่อนไข: ยอดยกมาเหลือไว้แค่แถวที่ 2
+    bf_indices = []
+    for idx, row in enumerate(all_parsed_rows):
+        # เช็คทั้งใน column description (index 2)
+        if any(kw in str(row[2]) for kw in bf_keywords):
+            bf_indices.append(idx)
+    
+    if len(bf_indices) >= 2:
+        keep_idx = bf_indices[1] # เก็บตัวที่ 2 (index 1)
+        for idx in bf_indices:
+            if idx != keep_idx:
+                rows_to_delete.add(idx)
+    elif len(bf_indices) == 1:
+        # ถ้ามีแค่ 1 แถว และคุณระบุว่า "เหลือไว้แค่แถวที่ 2" 
+        # หมายความว่าแถวที่ 1 นี้ต้องถูกลบด้วย (เพราะมันไม่ใช่แถวที่ 2)
+        rows_to_delete.add(bf_indices[0])
 
-    final_filtered_rows = []
-    i, n = 0, len(temp_list_bf)
+    # 2. เงื่อนไข: ลบแถวที่ไม่มีจำนวนเงินติดต่อกันมากกว่า 1 แถว
+    i = 0
+    n = len(all_parsed_rows)
     while i < n:
-        if temp_list_bf[i][3] is not None:
-            final_filtered_rows.append(temp_list_bf[i])
-            i += 1
-        else:
-            empty_block = []
-            while i < n and temp_list_bf[i][3] is None:
-                # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
-                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
-                    final_filtered_rows.append(temp_list_bf[i])
-                    i += 1
-                    continue
-                empty_block.append(temp_list_bf[i])
+        # ตรวจสอบว่าเป็นแถวที่ไม่มีจำนวนเงิน (Amount is None)
+        if all_parsed_rows[i][3] is None:
+            start_block = i
+            while i < n and all_parsed_rows[i][3] is None:
                 i += 1
-            # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
-            for item in empty_block:
-                final_filtered_rows.append(item)
+            end_block = i
             
+            # ถ้าจำนวนแถวใน block นี้ > 1 ให้ลบทั้งหมด
+            if (end_block - start_block) > 1:
+                for k in range(start_block, end_block):
+                    rows_to_delete.add(k)
+        else:
+            i += 1
+
+    # สร้าง List ผลลัพธ์สุดท้าย
+    final_filtered_rows = [
+        row for idx, row in enumerate(all_parsed_rows) 
+        if idx not in rows_to_delete
+    ]
+                
     return final_filtered_rows
 
 # ===== 2.SCB =====
