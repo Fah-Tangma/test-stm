@@ -711,12 +711,11 @@ if convert_button:
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         elif bank_option == "กรุงเทพ (BBL)":
                             rows = parse_bbl_pdf(unlocked_io)
-                            # --- พลิกลำดับจากล่างขึ้นบนตามความต้องการ ---
                             rows.reverse() 
                             df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
                             df['วันที่ที่มีผล'] = pd.to_datetime(df['วันที่ที่มีผล'], format='%d/%m/%Y', errors='coerce')
-                          all_dfs.append(df)
+                        all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
