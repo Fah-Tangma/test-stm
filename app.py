@@ -232,10 +232,14 @@ def parse_scb_pdf(pdf_stream):
     
     # คำที่ควรข้ามแม้จะอยู่ในโซนตารางแล้ว (เช่น สรุปยอดท้ายหน้า)
     ignore_keywords = [
+        "Date/Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
         "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
         "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
         "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)"
+        "สอบถามข้อมูลเพิ่มเติม", "02-722-2222", "Contact Center", "หน้าที่ (Page)", 
+        "ช่องทาง", "เลขที่เช็ค", "ยอดเงินหักบัญชี", "ยอดเงินเข้าบัญชี", "รายการ (Items)",  # <--- เพิ่มตรงนี้
+        "ลูกหนี้/เจ้าหนี้", "ยอดเงินคงเหลือ", "TOTAL AMOUNT", "เอกสารฉบับนี้", "TOTAL ITEMS",
+        "ธนาคารไทยพาณิชย์", "THE SIAM COMMERCIAL BANK", "ใบแจ้งรายการบัญชีออมทรัพย์"
     ]
     
     pending_desc = ""
