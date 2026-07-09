@@ -223,7 +223,7 @@ def parse_scb_pdf(pdf_stream):
     pending_desc = ""
 
     # คีย์เวิร์ดสำหรับยอดยกมา
-    bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD"]
+    bf_keywords = ["ยอดยกมา", "ยอดเงินคงเหลือยกมา", "BALANCE BROUGHT FORWARD", "ยอดเงินคงเหลือยกมา (BALANCE BROUGHT FORWARD)"]
     
     # รวมคำจากทั้ง 2 รูปแบบหัวตาราง เพื่อใช้ข้ามและใช้ตรวจจับจุดเริ่ม
     table_headers = [
