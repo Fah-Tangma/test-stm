@@ -326,23 +326,39 @@ def parse_scb_pdf(pdf_stream):
                         # กรณีเป็นข้อความรายละเอียดทั่วไป ให้ต่อท้ายรายการล่าสุด
                         all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line_clean).strip()
 
-            # --- ขั้นตอนสุดท้าย: Clean up ข้อมูล (Post-processing) ---
-    final_output = []
+     # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
+    temp_list_bf = []
+    found_first_bf = False
     for row in all_parsed_rows:
-        # 1. กรองคำใน ignore_keywords ออกจาก Description อีกครั้งเพื่อความสะอาด
-        clean_desc = row[6]
-        for kw in ignore_keywords:
-            clean_desc = clean_desc.replace(kw, "")
-        row[6] = clean_desc.strip()
+        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
+        if is_bf_row:
+            if not found_first_bf:
+                temp_list_bf.append(row)
+                found_first_bf = True
+        else:
+            temp_list_bf.append(row)
 
-        # 2. เก็บเฉพาะแถวที่มีตัวเลข หรือเป็น B/F และไม่มีข้อความขยะ
-        if row[4] != 0.0 or row[2] == "B/F":
-            final_output.append(row)
-        elif len(row[6]) > 2: # ถ้าไม่มีเงินแต่มีรายละเอียดเหลืออยู่ (และยาวพอ) ให้เอาไปแปะแถวบน
-            if final_output:
-                final_output[-1][6] = (final_output[-1][6] + " " + row[6]).strip()
-
-    return final_output
+    final_filtered_rows = []
+    i, n = 0, len(temp_list_bf)
+    while i < n:
+        if temp_list_bf[i][3] is not None:
+            final_filtered_rows.append(temp_list_bf[i])
+            i += 1
+        else:
+            empty_block = []
+            while i < n and temp_list_bf[i][3] is None:
+                # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
+                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
+                    final_filtered_rows.append(temp_list_bf[i])
+                    i += 1
+                    continue
+                empty_block.append(temp_list_bf[i])
+                i += 1
+            # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
+            for item in empty_block:
+                final_filtered_rows.append(item)
+            
+    return final_filtered_rows
 
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
