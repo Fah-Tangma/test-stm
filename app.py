@@ -230,12 +230,17 @@ def parse_scb_pdf(pdf_stream):
         "Debit/Credit", "Balance/Baht", "วันที่", "เวลา", "รายการ", "ช่องทาง", "ยอดเงินคงเหลือ"
     ]
 
-    # คำที่ควรข้ามเมื่อเจอในตาราง
+# รวมคำที่ไม่สนใจทั้งหมด (หัวกระดาษ, ท้ายกระดาษ, ข้อมูลบริษัท, Disclaimer)
     ignore_keywords = table_headers + [
-        "Balance Carried Forward", "Total Credit Amount", "Total Debit Amount",
-        "จำนวนเงินนำเข้าบัญชีทั้งหมด", "จำนวนเงินที่หักบัญชีทั้งหมด",
-        "เอกสารนี้ไม่จำเป็นต้องมีลายเซ็น", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "หน้าที่ (Page)", "รายการ (Items)", "TOTAL AMOUNT", "ธนาคารไทยพาณิชย์"
+        "This document is auto-generated", "signature is not required", 
+        "THE SIAM COMMERCIAL BANK PUBLIC COMPANY LIMITED", "สาขา ASAWANN SHOPPING COMPLEX",
+        "บริษัท เอสพี ริช กรุ๊ป จำกัด", "STATEMENT OF SAVING ACCOUNT", 
+        "เลขที่บัญชี", "ที่อยู่", "Account No.", "Address", "Name", "ชื่อ - สกุล",
+        "TOTAL ITEMS", "TOTAL AMOUNT", "TOTAL DEBIT", "TOTAL CREDIT",
+        "กรุณาติดต่อศูนย์บริการลูกค้าธุรกิจ", "02-722-2222", "Contact Center",
+        "computer-generated", "authorized person", "signature of SCB",
+        "หน้าที่", "Page", "เอกสารฉบับนี้", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
+        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป"
     ]
 
     with pdfplumber.open(pdf_stream) as pdf:
