@@ -176,40 +176,53 @@ def parse_kbank_pdf(pdf_stream):
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
     # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
-    # ขั้นตอนที่ 5.1: ลบ "ยอดยกมา" (B/F) ให้เหลือแค่แถวแรกสุดตัวเดียว
-    temp_list_bf = []
-    found_first_bf = False
-    for row in all_raw_rows:
-        if row[2] == "B/F":
-            if not found_first_bf:
-                temp_list_bf.append(row)
-                found_first_bf = True
-        else:
-            temp_list_bf.append(row)
+    # =========================================================
+    # ส่วนของการกรองข้อมูล (Filtering)
+    # =========================================================
+    
+    rows_to_delete = set()
+    n = len(all_parsed_rows)
 
-    # ขั้นตอนที่ 5.2: ลบแถวว่าง (Amount is None) ที่ต่อเนื่องกันมากกว่า 1 แถว
-    final_filtered_rows = []
-    i, n = 0, len(temp_list_bf)
+    # --- เงื่อนไขที่ 1: ยอดยกมาเหลือไว้แค่แถวที่ 2 ---
+    bf_indices = []
+    for idx, row in enumerate(all_parsed_rows):
+        description = str(row[2])
+        if any(kw in description for kw in bf_keywords):
+            bf_indices.append(idx)
+    
+    if len(bf_indices) >= 2:
+        keep_idx = bf_indices[1] # เก็บตัวที่ 2 (index 1)
+        for idx in bf_indices:
+            if idx != keep_idx:
+                rows_to_delete.add(idx)
+    elif len(bf_indices) == 1:
+        # ถ้ามีแค่แถวเดียวแต่ต้องการ "แถวที่ 2" แถวที่ 1 นี้ก็ต้องลบ
+        rows_to_delete.add(bf_indices[0])
+
+    # --- เงื่อนไขที่ 2: ลบกลุ่มที่ไม่มีจำนวนเงินติดกันมากกว่า 1 แถว ---
+    i = 0
     while i < n:
-        # ถ้าแถวนั้นมีจำนวนเงิน หรือเป็นยอดยกมาที่เลือกไว้ ให้เก็บไว้
-        if temp_list_bf[i][4] is not None or temp_list_bf[i][2] == "B/F":
-            final_filtered_rows.append(temp_list_bf[i])
-            i += 1
-        else:
-            # เริ่มตรวจสอบกลุ่มแถวว่าง
-            empty_block = []
-            while i < n and temp_list_bf[i][4] is None and temp_list_bf[i][2] != "B/F":
-                # กรองพวกคำใน ignore_keywords อีกครั้งเพื่อความชัวร์
-                if not any(kw in str(temp_list_bf[i][3]) for kw in ignore_keywords):
-                    empty_block.append(temp_list_bf[i])
+        # ตรวจสอบว่าช่อง Amount (index 3) เป็น None หรือไม่
+        if all_parsed_rows[i][3] is None:
+            start_block = i
+            # วิ่งวนเพื่อหาว่ามันติดกันกี่แถว
+            while i < n and all_parsed_rows[i][3] is None:
                 i += 1
+            end_block = i
             
-            # ถ้ามีแถวว่างแถวเดียว (มักจะเป็นรายละเอียดต่อท้าย) ให้เอาไป Merge กับแถวบน
-            if len(empty_block) == 1:
-                if final_filtered_rows:
-                    final_filtered_rows[-1][3] = (str(final_filtered_rows[-1][3]) + " " + str(empty_block[0][3])).strip()
-            # ถ้ามีมากกว่า 1 แถว ให้ "ลบทิ้งทั้งหมด" (ข้ามไปเลย)
+            # ถ้ากลุ่มนี้มีจำนวนแถวมากกว่า 1 แถว ให้ลบทิ้งทั้งหมดในกลุ่มนั้น
+            if (end_block - start_block) > 1:
+                for k in range(start_block, end_block):
+                    rows_to_delete.add(k)
+        else:
+            i += 1
 
+    # สร้างข้อมูลชุดสุดท้ายโดยข้าม index ที่สั่งลบ
+    final_filtered_rows = [
+        row for idx, row in enumerate(all_parsed_rows) 
+        if idx not in rows_to_delete
+    ]
+            
     return final_filtered_rows
 
 # ===== 2.SCB =====
