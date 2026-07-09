@@ -262,7 +262,7 @@ def parse_scb_pdf(pdf_stream):
 
                 # 2. เช็คบรรทัดธุรกรรม (มี วันที่ และ เวลา)
                 # รองรับรูปแบบ 01/04/2026 หรือ 01/04/26
-                                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 if transaction_match:
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
