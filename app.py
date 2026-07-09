@@ -219,22 +219,23 @@ def str_to_float(val):
 
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
-    # เพิ่มคำค้นหาให้ตรงกับในไฟล์ (ทั้งไทยและอังกฤษ)
     bf_keywords = ["ยอดยกมา", "BALANCE FORWARD", "BALANCE BROUGHT FORWARD", "ยอดเงินคงเหลือยกมา"]
     
-    description_keywords = ("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม", "ซื้อสินค้า")
+    description_keywords = ("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม", "ซื้อสินค้า", "รับชำระ")
     
+    # เพิ่มคำสั่งข้ามบรรทัดสรุปยอดและเลขหน้า
     ignore_keywords = [
         "ธนาคารไทยพาณิชย์", "จำกัด", "มหาชน", "THE SIAM COMMERCIAL", "สาขา",
         "ใบแจ้งรายการ", "STATEMENT OF", "เลขที่บัญชี", "Account No",
-        "หน้า (Page)", "ช่องทาง", "เลขที่เช็ค"
+        "ช่องทาง", "เลขที่เช็ค",
+        "ยอดยกไป", "Balance Carried Forward", "จำนวนเงินนำเข้าบัญชีทั้งหมด", "รายการ (Items)",
+        "TOTAL AMOUNT", "TOTAL ITEMS"
     ]
 
     pending_desc = "" 
 
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
-            # ปรับ y_tolerance กลับมาเป็น 3 เพื่อให้เก็บข้อความในบรรทัดเดียวกันได้ครบ
             words = page.extract_words(x_tolerance=2, y_tolerance=3)
             if not words: continue
 
@@ -251,7 +252,7 @@ def parse_scb_pdf(pdf_stream):
                 line = " ".join([w['text'] for w in sorted(lines_dict[y], key=lambda x: x['x0'])]).strip()
                 if not line: continue
 
-                # --- แก้ไขจุดที่ 1: เช็คยอดยกมาก่อนสิ่งอื่นใด ---
+                # 1. เช็คยอดยกมาก่อน
                 if any(kw in line.upper() for kw in bf_keywords):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
@@ -259,8 +260,10 @@ def parse_scb_pdf(pdf_stream):
                         in_transaction_zone = True
                         continue
 
-                # --- แก้ไขจุดที่ 2: ข้ามบรรทัดที่ไม่ใช่ข้อมูล (Header/Footer) ---
-                if any(ig in line for ig in ignore_keywords): continue
+                # 2. ข้ามบรรทัดสรุปยอด/ขยะ (ยอดยกไป, เลขหน้า ฯลฯ)
+                # เพิ่มเช็ค "หน้าที่ (Page)" ตรงๆ เพื่อข้ามบรรทัดนั้นทั้งบรรทัด
+                if any(ig in line for ig in ignore_keywords) or "หน้าที่ (Page)" in line:
+                    continue
 
                 # 3. เช็คบรรทัดธุรกรรม (วันที่และเวลา)
                 transaction_match = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
@@ -288,22 +291,27 @@ def parse_scb_pdf(pdf_stream):
                     line_desc = remaining.replace(code, "", 1).replace(channel, "", 1)
                     for amt in amounts: line_desc = line_desc.replace(amt, "")
                     
-                    # รวมคำที่ค้างอยู่ในถังพัก
-                    full_desc = (pending_desc + " " + line_desc.strip()).strip()
+                    # --- แก้ไขจุดสำคัญ: ลบ "หน้าที่ (Page)xxx/xxx" ที่ชอบมาแปะท้าย Description ออก ---
+                    line_desc = re.sub(r'หน้าที่\s*\(Page\)\s*[\d/]+', '', line_desc).strip()
+                    
+                    full_desc = (pending_desc + " " + line_desc).strip()
                     pending_desc = "" 
                     
                     all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, full_desc])
                 
-                # 4. จัดการรายละเอียดรายการ
+                # 4. จัดการรายละเอียดรายการต่อท้าย
                 elif in_transaction_zone and all_parsed_rows:
-                    if "Total" in line or "ยอดรวม" in line:
-                        in_transaction_zone = False
+                    # ถ้าเจอคำในขยะ ไม่ต้องเอามาต่อ Description
+                    if any(ig in line for ig in ignore_keywords) or "หน้าที่ (Page)" in line:
                         continue
                         
                     if line.startswith(description_keywords):
                         pending_desc = (pending_desc + " " + line).strip()
                     else:
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
+                        # ลบเลขหน้าถ้าบังเอิญติดมาในบรรทัดคำอธิบายแยก
+                        clean_line = re.sub(r'หน้าที่\s*\(Page\)\s*[\d/]+', '', line).strip()
+                        if clean_line:
+                            all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + clean_line).strip()
 
     return all_parsed_rows
 
