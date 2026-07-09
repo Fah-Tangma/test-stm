@@ -212,106 +212,94 @@ def parse_kbank_pdf(pdf_stream):
 # ===== 2.SCB =====
 def str_to_float(val):
     if not val: return 0.0
-    try:
-        return float(val.replace(',', ''))
-    except:
-        return 0.0
+    return float(val.replace(',', ''))
 
 def parse_scb_pdf(pdf_stream):
     all_parsed_rows = []
-    bf_keywords = ["ยอดยกมา", "BALANCE FORWARD", "BALANCE BROUGHT FORWARD", "ยอดเงินคงเหลือยกมา"]
+    # คีย์เวิร์ดสำหรับระบุการเริ่มตาราง
+    header_trigger = ["วัน/เวลา", "Date/Time", "รายการ", "ยอดเงินหักบัญชี"]
+    # คีย์เวิร์ดสำหรับยอดยกมา
+    bf_keywords = ["ยอดยกมา", "BALANCE BROUGHT FORWARD"]
     
-    description_keywords = ("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม", "ซื้อสินค้า", "รับชำระ")
-    
-    # เพิ่มคำสั่งข้ามบรรทัดสรุปยอดและเลขหน้า
-    ignore_keywords = [
-        "ธนาคารไทยพาณิชย์", "จำกัด", "มหาชน", "THE SIAM COMMERCIAL", "สาขา",
-        "ใบแจ้งรายการ", "STATEMENT OF", "เลขที่บัญชี", "Account No",
-        "ช่องทาง", "เลขที่เช็ค",
-        "ยอดยกไป", "Balance Carried Forward", "จำนวนเงินนำเข้าบัญชีทั้งหมด", "รายการ (Items)",
-        "TOTAL AMOUNT", "TOTAL ITEMS"
-    ]
-
-    pending_desc = "" 
+    header_found = False
+    pending_desc = ""
 
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
-            words = page.extract_words(x_tolerance=2, y_tolerance=3)
-            if not words: continue
-
-            lines_dict = {}
-            for w in words:
-                y = round(w['top']) 
-                if y not in lines_dict: lines_dict[y] = []
-                lines_dict[y].append(w)
+            text = page.extract_text()
+            if not text: continue
+            lines = text.split('\n')
             
-            sorted_y = sorted(lines_dict.keys())
-            in_transaction_zone = False
-
-            for y in sorted_y:
-                line = " ".join([w['text'] for w in sorted(lines_dict[y], key=lambda x: x['x0'])]).strip()
+            for line in lines:
+                line = line.strip()
                 if not line: continue
 
-                # 1. เช็คยอดยกมาก่อน
+                # 1. ตรวจสอบว่าเริ่มเข้าสู่ตารางหรือยัง
+                if any(kw in line for kw in header_trigger):
+                    header_found = True
+                    continue # ข้ามบรรทัดหัวตารางไป
+
+                # 2. กรณีเจอยอดยกมา (มักอยู่ก่อนหรือบรรทัดแรกของตาราง)
                 if any(kw in line.upper() for kw in bf_keywords):
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
                     if amounts:
-                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, str_to_float(amounts[-1]), "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
-                        in_transaction_zone = True
-                        continue
-
-                # 2. ข้ามบรรทัดสรุปยอด/ขยะ (ยอดยกไป, เลขหน้า ฯลฯ)
-                # เพิ่มเช็ค "หน้าที่ (Page)" ตรงๆ เพื่อข้ามบรรทัดนั้นทั้งบรรทัด
-                if any(ig in line for ig in ignore_keywords) or "หน้าที่ (Page)" in line:
+                        balance = str_to_float(amounts[-1])
+                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
                     continue
 
-                # 3. เช็คบรรทัดธุรกรรม (วันที่และเวลา)
-                transaction_match = re.search(r'(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
+                # 3. ถ้ายังไม่เจอหัวตาราง ให้ข้ามไปก่อน
+                if not header_found:
+                    continue
+
+                # 4. ตรวจสอบรายการเดินบัญชี (Transaction) โดยใช้รูปแบบ วันที่ และ เวลา
+                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line)
                 
                 if transaction_match:
-                    in_transaction_zone = True
                     date_str = transaction_match.group(1)
                     time_str = transaction_match.group(2)
                     
+                    # ค้นหาจำนวนเงินทั้งหมดในบรรทัด (ยอดรายการ และ ยอดคงเหลือ)
                     amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line)
-                    remaining = line.split(time_str)[-1].strip()
-                    parts = remaining.split()
-                    code = parts[0] if parts else "-"
-                    channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
+                    
+                    # ตัดเอาส่วนข้อความที่เหลือเพื่อหา Code และ Channel
+                    remaining_text = line.replace(date_str, "").replace(time_str, "").strip()
+                    for amt in amounts:
+                        remaining_text = remaining_text.replace(amt, "")
+                    
+                    parts = remaining_text.split()
+                    code = parts[0] if len(parts) > 0 else "-"
+                    channel = parts[1] if len(parts) > 1 else "-"
+                    
+                    amount_val = 0.0
+                    balance_val = 0.0
 
-                    amount_val, balance_val = 0.0, 0.0
                     if len(amounts) >= 2:
+                        # ปกติ SCB: [จำนวนเงินหัก/เข้า, ยอดคงเหลือ]
                         balance_val = str_to_float(amounts[-1])
-                        amount_val = str_to_float(amounts[-2])
-                        if code.upper() not in ['X1', 'DP', 'CR', 'IN', 'IT', 'BT', 'SDP']:
-                            amount_val = -amount_val
+                        raw_amount = str_to_float(amounts[-2])
+                        
+                        # ตรวจสอบ Code เพื่อระบุว่าเป็นเงินเข้าหรือออก
+                        # เงินเข้า: X1(โอนเข้า), IN(ดอกเบี้ย), IT(โอนเข้า), DP(ฝาก), CR(ปรับปรุงยอดเข้า)
+                        if code.upper() in ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'C1', 'NR', 'TRN']:
+                            amount_val = raw_amount
+                        else:
+                            amount_val = -raw_amount # ติดลบสำหรับ Withdrawal
                     elif len(amounts) == 1:
                         balance_val = str_to_float(amounts[0])
 
-                    line_desc = remaining.replace(code, "", 1).replace(channel, "", 1)
-                    for amt in amounts: line_desc = line_desc.replace(amt, "")
+                    # เก็บรายละเอียดส่วนท้ายของบรรทัด
+                    desc_part = " ".join(parts[2:]) if len(parts) > 2 else ""
                     
-                    # --- แก้ไขจุดสำคัญ: ลบ "หน้าที่ (Page)xxx/xxx" ที่ชอบมาแปะท้าย Description ออก ---
-                    line_desc = re.sub(r'หน้าที่\s*\(Page\)\s*[\d/]+', '', line_desc).strip()
-                    
-                    full_desc = (pending_desc + " " + line_desc).strip()
-                    pending_desc = "" 
-                    
-                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, full_desc])
+                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, desc_part])
                 
-                # 4. จัดการรายละเอียดรายการต่อท้าย
-                elif in_transaction_zone and all_parsed_rows:
-                    # ถ้าเจอคำในขยะ ไม่ต้องเอามาต่อ Description
-                    if any(ig in line for ig in ignore_keywords) or "หน้าที่ (Page)" in line:
+                # 5. จัดการบรรทัดที่เป็นรายละเอียดต่อจากบรรทัดหลัก (ไม่มีวันที่)
+                elif all_parsed_rows and header_found:
+                    # ข้ามคำสั่งท้ายกระดาษหรือสรุปยอด
+                    if any(kw in line for kw in ["หน้าที่", "Total Amount", "จัดพิมพ์ผ่าน"]):
                         continue
-                        
-                    if line.startswith(description_keywords):
-                        pending_desc = (pending_desc + " " + line).strip()
-                    else:
-                        # ลบเลขหน้าถ้าบังเอิญติดมาในบรรทัดคำอธิบายแยก
-                        clean_line = re.sub(r'หน้าที่\s*\(Page\)\s*[\d/]+', '', line).strip()
-                        if clean_line:
-                            all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + clean_line).strip()
+                    
+                    # นำข้อความไปต่อท้าย Description ของแถวล่าสุด
+                    all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line).strip()
 
     return all_parsed_rows
 
