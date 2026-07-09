@@ -240,7 +240,7 @@ def parse_scb_pdf(pdf_stream):
         "กรุณาติดต่อศูนย์บริการลูกค้าธุรกิจ", "02-722-2222", "Contact Center",
         "computer-generated", "authorized person", "signature of SCB",
         "หน้าที่", "Page", "เอกสารฉบับนี้", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป"
+        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป", "ธนาคารไทยพาณิชย์", "จำกัด", "(มหาชน)"
     ]
 
     with pdfplumber.open(pdf_stream) as pdf:
