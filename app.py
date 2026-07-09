@@ -175,37 +175,48 @@ def parse_kbank_pdf(pdf_stream):
                     c_extra, d_extra = split_channel_and_detail(line)
                     all_parsed_rows.append(["", "", "", None, None, c_extra if c_extra != "-" else "", d_extra])
 
-    # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
-    temp_list_bf = []
-    found_first_bf = False
-    for row in all_parsed_rows:
-        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
-        if is_bf_row:
-            if not found_first_bf:
-                temp_list_bf.append(row)
-                found_first_bf = True
-        else:
-            temp_list_bf.append(row)
+ # 1. จัดการเรื่อง "ยอดยกมา" (เก็บไว้เฉพาะลำดับที่ 2)
+    bf_indices = []
+    for idx, row in enumerate(all_parsed_rows):
+        if any(kw in str(row[2]) for kw in bf_keywords):
+            bf_indices.append(idx)
+    
+    rows_to_delete = set()
+    if len(bf_indices) >= 2:
+        # ถ้ามีตั้งแต่ 2 แถวขึ้นไป ให้เก็บอันที่ 2 (index 1) ไว้ และลบที่เหลือ
+        keep_idx = bf_indices[1]
+        for idx in bf_indices:
+            if idx != keep_idx:
+                rows_to_delete.add(idx)
+    elif len(bf_indices) == 1:
+        # ถ้ามีแค่แถวเดียว ตามเงื่อนไข "เหลือไว้แค่แถวที่ 2" 
+        # อาจหมายถึงลบแถวแรกทิ้งไปเลย หรือจะเก็บไว้ถ้ามันมีอันเดียว (ในที่นี้ขอเลือกเก็บไว้ถ้ามีอันเดียวเพื่อกันข้อมูลหาย)
+        # แต่ถ้าต้องการลบทิ้งเลยหากไม่ใช่ลำดับที่ 2 ให้ใช้ rows_to_delete.add(bf_indices[0])
+        pass
 
-    final_filtered_rows = []
-    i, n = 0, len(temp_list_bf)
+    # 2. จัดการแถวที่ไม่มีจำนวนเงิน (Amount is None) ติดกันมากกว่า 1 แถว
+    i = 0
+    n = len(all_parsed_rows)
     while i < n:
-        if temp_list_bf[i][3] is not None:
-            final_filtered_rows.append(temp_list_bf[i])
-            i += 1
-        else:
-            empty_block = []
-            while i < n and temp_list_bf[i][3] is None:
-                # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
-                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
-                    final_filtered_rows.append(temp_list_bf[i])
-                    i += 1
-                    continue
-                empty_block.append(temp_list_bf[i])
+        if all_parsed_rows[i][3] is None:
+            start_block = i
+            # หาว่ามีแถวที่ Amount เป็น None ติดกันกี่แถว
+            while i < n and all_parsed_rows[i][3] is None:
                 i += 1
-            # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
-            for item in empty_block:
-                final_filtered_rows.append(item)
+            end_block = i
+            
+            # ถ้าติดกันมากกว่า 1 แถว (count > 1)
+            if (end_block - start_block) > 1:
+                for k in range(start_block, end_block):
+                    rows_to_delete.add(k)
+        else:
+            i += 1
+
+    # สร้าง List ใหม่โดยตัดแถวที่อยู่ใน rows_to_delete ออก
+    final_filtered_rows = [
+        row for idx, row in enumerate(all_parsed_rows) 
+        if idx not in rows_to_delete
+    ]
             
     return final_filtered_rows
 
