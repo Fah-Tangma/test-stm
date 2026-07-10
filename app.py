@@ -694,40 +694,27 @@ if not st.session_state["authenticated"]:
 
 else:
  # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
-    st.markdown("""
-        <style>
-        /* ปรับแต่ง Container หลักของ Sidebar */
-        [data-testid="stSidebarUserContent"] {
-            display: flex;
-            flex-direction: column;
-            height: 100vh; /* บังคับความสูงให้เต็มหน้าจอ */
-        }
-    
-        /* ดันเนื้อหาด้านบน (ตัวเลือกต่างๆ) ให้ขยายตัวเพื่อดัน Footer ลงข้างล่าง */
-        [data-testid="stSidebarUserContent"] > div:first-child {
-            flex: 1;
-        }
-    
-        /* สไตล์ของส่วน Footer (Admin + Log out) */
-        .sidebar-footer {
-            padding-bottom: 20px;
-            padding-top: 10px;
-        }
-    
-        /* สไตล์เส้นกั้นบางๆ */
-        .footer-line {
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            margin-bottom: 15px;
-        }
-        
-        /* ปรับระยะห่างปุ่ม Log out ให้เล็กลง */
-        .stButton > button {
-            height: 32px;
-            padding-top: 0px;
-            padding-bottom: 0px;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    st.markdown(
+    """
+    <style>
+    /* ทำให้ Sidebar อยู่กับที่ (Fixed) */
+    [data-testid="stSidebar"] {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        height: 100vh;
+        overflow-y: auto; /* ให้เลื่อนเฉพาะใน Sidebar ได้ถ้าเมนูยาวเกินหน้าจอ */
+    }
+
+    /* ปรับแต่งส่วนเนื้อหาหลักไม่ให้โดนทับ (ถ้าจำเป็น) */
+    [data-testid="stAppViewContainer"] {
+        margin-left: 0; 
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
