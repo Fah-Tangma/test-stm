@@ -34,11 +34,12 @@ def login_page():
         
         if submit:
             user_db = st.secrets["passwords"]
+            # ตรวจสอบว่ามี username นี้ในฐานข้อมูลหรือไม่
             if username in user_db and password == user_db[username]:
                 st.session_state["authenticated"] = True
-                # --- เพิ่มบรรทัดนี้เพื่อเก็บชื่อ User ---
+                # --- บรรทัดสำคัญ: ต้องมีบรรทัดนี้เพื่อให้ระบบจำชื่อได้ ---
                 st.session_state["username"] = username 
-                # ------------------------------------
+                # --------------------------------------------------
                 st.rerun()
             else:
                 st.error("❌ Username หรือ Password ไม่ถูกต้อง")
