@@ -695,21 +695,32 @@ if not st.session_state["authenticated"]:
 else:
     # 1. เพิ่ม CSS ไว้ด้านบนสุด (หลังการ import) เพื่อจัดการ Layout ของ Sidebar
     st.markdown("""
-        <style>
-        /* ทำให้ Sidebar มีโครงสร้างแบบ Flexbox */
-        [data-testid="stSidebarUserContent"] {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-        
-        /* ดันเนื้อหาส่วนท้าย (Footer) ให้ไปอยู่ล่างสุด */
-        .sidebar-footer {
-            margin-top: auto;
-            padding-bottom: 20px;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    <style>
+    /* ปรับแต่งโครงสร้าง Sidebar ให้ยืดเต็มความสูง */
+    [data-testid="stSidebarUserContent"] {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+
+    /* ดันเนื้อหาส่วนนี้ให้ไปอยู่ล่างสุด */
+    .st-emotion-cache-16idsys {
+        flex-grow: 1;
+    }
+
+    .pinned-footer {
+        margin-top: auto; /* ดันลงล่างสุด */
+        padding-top: 10px;
+        padding-bottom: 20px;
+    }
+    
+    /* สไตล์เส้นกั้นบางๆ */
+    .thin-line {
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 15px;
+    }
+    </style>
+""", unsafe_allow_html=True)
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
@@ -723,9 +734,11 @@ with st.sidebar:
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
     convert_button = st.button("เริ่มการแปลงไฟล์", use_container_width=True)
     
-    # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
-    # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
-    st.markdown('</div>', unsafe_allow_html=True) # ปิด Tag ภายใน sidebar
+    # --- ส่วน Footer ที่ชิดด้านล่างสุด ---
+    st.markdown('<div class="pinned-footer">', unsafe_allow_html=True)
+    
+    # เส้นกั้นบางๆ
+    st.markdown('<div class="thin-line"></div>', unsafe_allow_html=True)
 
     # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
     # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
