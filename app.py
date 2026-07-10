@@ -1316,27 +1316,33 @@ with st.sidebar:
     st.markdown(
         """
         <style>
-        /* 1. ล็อก Sidebar ไม่ให้เลื่อน (ปิด Scrollbar และการไถ) */
+        /* 1. ล็อกไม่ให้ Sidebar ทั้งหมดเลื่อน (Scroll) */
         [data-testid="stSidebar"] > div:first-child {
             overflow-y: hidden !important;
         }
     
-        /* 2. (ตัวเลือกเสริม) ซ่อนแถบเลื่อนที่อาจจะโผล่มาเป็นเส้นบางๆ */
-        [data-testid="stSidebar"] ::-webkit-scrollbar {
-            display: none;
-        }
-        
-        /* 3. ปรับระยะให้ Footer อยู่ล่างสุดตามเดิม */
+        /* 2. สร้างแถบ Footer ตรึงไว้ล่างสุดของ Sidebar */
         .sidebar-footer {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 336px;
-            background-color: #11151c;
+            width: 21rem; /* ความกว้างมาตรฐานของ Sidebar */
+            background-color: #11151c; /* สีพื้นหลังธีมมืด */
             padding: 15px 20px;
             border-top: 1px solid #333;
             z-index: 9999;
             box-sizing: border-box;
+        }
+    
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    
+        /* 3. ดันเนื้อหาเมนูข้างบนขึ้นไปเพื่อไม่ให้โดน Footer ทับ */
+        [data-testid="stSidebarUserContent"] {
+            padding-bottom: 80px !important;
         }
         </style>
         """,
