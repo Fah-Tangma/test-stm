@@ -1299,7 +1299,6 @@ if not st.session_state["authenticated"]:
 else:
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     
-
     st.title("📑 PDF Statement to Excel")
     st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
@@ -1314,7 +1313,35 @@ with st.sidebar:
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
     # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
-    st.markdown("<br>" * 10, unsafe_allow_html=True) 
+    st.markdown(
+        """
+        <style>
+        /* 1. ล็อก Sidebar ไม่ให้เลื่อน (ปิด Scrollbar และการไถ) */
+        [data-testid="stSidebar"] > div:first-child {
+            overflow-y: hidden !important;
+        }
+    
+        /* 2. (ตัวเลือกเสริม) ซ่อนแถบเลื่อนที่อาจจะโผล่มาเป็นเส้นบางๆ */
+        [data-testid="stSidebar"] ::-webkit-scrollbar {
+            display: none;
+        }
+        
+        /* 3. ปรับระยะให้ Footer อยู่ล่างสุดตามเดิม */
+        .sidebar-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 336px;
+            background-color: #11151c;
+            padding: 15px 20px;
+            border-top: 1px solid #333;
+            z-index: 9999;
+            box-sizing: border-box;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     st.divider() # เส้นคั่นบางๆ
 
