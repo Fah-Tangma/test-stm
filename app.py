@@ -688,38 +688,37 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# --- เช็คการ Logout จากปุ่ม HTML (วางไว้ส่วนบนของ script) ---
- if st.query_params.get("logout") == "true":
+# เช็ค Logout จาก query parameter
+if st.query_params.get("logout") == "true":
     st.session_state["authenticated"] = False
     st.query_params.clear()
     st.rerun()
 
- if not st.session_state["authenticated"]:
+if not st.session_state["authenticated"]:
     login_page()
-    st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
+    st.stop()
 
 else:
- # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
-    else:
-    # --- 1. CSS สำหรับ Fixed Footer ล่างซ้ายสุด ---
+    # --- CSS ปรับแต่งความกว้างและตรึง Footer ด้านล่างสุด ---
     st.markdown(
         """
         <style>
-        /* 1. เว้นที่ว่างด้านล่างของเนื้อหา Sidebar เพื่อไม่ให้โดน Footer ทับ */
-        [data-testid="stSidebarUserContent"] {
-            padding-bottom: 80px !important;
+        /* 1. เว้นระยะด้านล่างของเนื้อหา Sidebar ไม่ให้โดน Footer ทับ */
+        [data-testid="stSidebar"] > div:first-child {
+            padding-bottom: 90px !important;
         }
     
-        /* 2. กำหนดให้ Container ของส่วนท้ายติดหนึบที่ขอบล่างซ้ายและกว้างเท่า Sidebar */
+        /* 2. กำหนดขนาดของ Footer ให้พอดีและติดหนึบมุมล่างซ้าย */
         .sidebar-footer {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 21rem; /* ขนาดความกว้างมาตรฐานของ Sidebar ใน Streamlit */
-            background-color: #11151c; /* สีพื้นหลังเดียวกับ Sidebar */
+            width: 21rem; /* ความกว้างมาตรฐานของ Sidebar ใน Streamlit */
+            background-color: #11151c;
             padding: 15px 20px;
             border-top: 1px solid #333;
-            z-index: 999;
+            z-index: 99999;
+            box-sizing: border-box;
         }
         
         .footer-content {
@@ -786,7 +785,7 @@ with st.sidebar:
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
     st.markdown(
-        f"""
+        """
         <div class="sidebar-footer">
             <div class="footer-content">
                 <div style="color: white; font-size: 14px; display: flex; align-items: center;">
