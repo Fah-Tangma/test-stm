@@ -710,7 +710,27 @@ with st.sidebar:
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)", "กรุงเทพ (BBL)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
-    convert_button = st.button("เริ่มการแปลงไฟล์")
+    convert_button = st.button("เริ่มการแปลงไฟล์", , use_container_width=True))
+    
+    # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
+    # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
+    st.markdown("<br>" * 10, unsafe_allow_html=True) 
+    
+    st.divider() # เส้นคั่นบางๆ
+
+    # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
+    # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
+    user_col, logout_col = st.columns([2, 1])
+
+    with user_col:
+        # สมมติชื่อ User เป็น 'Admin' (คุณสามารถเปลี่ยนเป็นตัวแปรจากระบบ Login ได้)
+        st.markdown("👤 **Admin User**")
+
+    with logout_col:
+        if st.button("Log out", key="logout_btn", size="small"):
+            # เพิ่ม Logic การ Logout ตรงนี้ (เช่น ล้าง session)
+            st.session_state.clear()
+            st.rerun()
 
 if convert_button:
     if not pdf_files:
