@@ -693,11 +693,6 @@ if not st.session_state["authenticated"]:
     st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
 
 else:
-    # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
-    st.title("📑 PDF Statement to Excel")
-    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
-
-info_placeholder = st.empty()
     # 1. เพิ่ม CSS ไว้ด้านบนสุด (หลังการ import) เพื่อจัดการ Layout ของ Sidebar
     st.markdown("""
         <style>
@@ -715,6 +710,13 @@ info_placeholder = st.empty()
         }
         </style>
     """, unsafe_allow_html=True)
+    
+    # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
+    st.title("📑 PDF Statement to Excel")
+    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
+
+info_placeholder = st.empty()
+
 
 with st.sidebar:
     st.header("ตัวเลือก")
