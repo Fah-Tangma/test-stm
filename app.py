@@ -1307,22 +1307,22 @@ else:
     st.markdown(
         """
         <style>
-        /* 1. เว้นระยะด้านล่างของเนื้อหา Sidebar ไม่ให้โดน Footer ทับ */
-        [data-testid="stSidebar"] > div:first-child {
-            padding-bottom: 90px !important;
+        /* 1. เว้นที่ว่างด้านล่างของเมนู เพื่อไม่ให้โดนแถบ Admin บังเวลาเลื่อนลงสุด */
+        [data-testid="stSidebarUserContent"] {
+            padding-bottom: 80px !important;
         }
     
-        /* 2. กำหนดขนาดของ Footer ให้พอดีและติดหนึบมุมล่างซ้าย */
+        /* 2. ปรับแต่งแถบ Footer ให้กว้างเท่า Sidebar (336px คือค่ามาตรฐาน) */
         .sidebar-footer {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 21rem; /* ความกว้างมาตรฐานของ Sidebar ใน Streamlit */
-            background-color: #11151c;
+            width: 336px; /* ความกว้างมาตรฐานของ Sidebar */
+            background-color: #11151c; /* สีพื้นหลังเดียวกับธีมมืด */
             padding: 15px 20px;
             border-top: 1px solid #333;
-            z-index: 99999;
-            box-sizing: border-box;
+            z-index: 9999;
+            box-sizing: border-box; /* ทำให้ padding ไม่เพิ่มความกว้างเกิน */
         }
         
         .footer-content {
@@ -1348,7 +1348,7 @@ with st.sidebar:
 
     # --- ส่วน Footer ด้านล่างสุด (ชิดล่างซ้าย และกว้างเท่าแถบเมนู) ---
     st.markdown(
-        """
+        f"""
         <div class="sidebar-footer">
             <div class="footer-content">
                 <div style="color: white; font-size: 14px; display: flex; align-items: center;">
