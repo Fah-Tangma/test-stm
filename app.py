@@ -698,6 +698,23 @@ else:
     st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
 info_placeholder = st.empty()
+    # 1. เพิ่ม CSS ไว้ด้านบนสุด (หลังการ import) เพื่อจัดการ Layout ของ Sidebar
+    st.markdown("""
+        <style>
+        /* ทำให้ Sidebar มีโครงสร้างแบบ Flexbox */
+        [data-testid="stSidebarUserContent"] {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* ดันเนื้อหาส่วนท้าย (Footer) ให้ไปอยู่ล่างสุด */
+        .sidebar-footer {
+            margin-top: auto;
+            padding-bottom: 20px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("ตัวเลือก")
@@ -708,7 +725,7 @@ with st.sidebar:
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
     # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
-    st.markdown("<br>" * 10, unsafe_allow_html=True) 
+     st.markdown('<div class="sidebar-footer">', unsafe_allow_html=True)
     
     st.divider() # เส้นคั่นบางๆ
 
@@ -717,14 +734,15 @@ with st.sidebar:
     user_col, logout_col = st.columns([2, 1])
 
     with user_col:
-        # สมมติชื่อ User เป็น 'Admin' (คุณสามารถเปลี่ยนเป็นตัวแปรจากระบบ Login ได้)
-        st.markdown("👤 **Admin User**")
+        st.markdown(f"👤 **{username if 'username' in locals() else 'Admin'}**")
 
     with logout_col:
-        if st.button("Log out", key="logout_btn"):
+        if st.button("Log out", key="logout_btn", use_container_width=True):
             # เพิ่ม Logic การ Logout ตรงนี้ (เช่น ล้าง session)
             st.session_state.clear()
             st.rerun()
+            
+st.markdown('</div>', unsafe_allow_html=True)
 
 if convert_button:
     if not pdf_files:
