@@ -43,37 +43,7 @@ def login_page():
             else:
                 st.error("❌ Username หรือ Password ไม่ถูกต้อง")
 
-# ================= 2. เริ่มต้นการทำงาน =================
-
-# ตรวจสอบสถานะการ Login ใน Session State
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-# --- กรณีที่ยังไม่ผ่าน Login ---
-if not st.session_state["authenticated"]:
-    login_page()
-    st.stop()  # **สำคัญมาก: หยุดการทำงานของโค้ดที่เหลือทั้งหมดไว้ที่นี่**
-
-# --- กรณีที่ Login ผ่านแล้ว โค้ดส่วนข้างล่างนี้ถึงจะทำงาน ---
-else:
-    # เพิ่มปุ่ม Logout ไว้ที่ Sidebar
-    if st.sidebar.button("Log out"):
-        st.session_state["authenticated"] = False
-        st.rerun()
-
-    # --- ส่วน UI แปลงไฟล์เดิมของคุณเริ่มจากตรงนี้ ---
-    st.title("📑 PDF Statement to Excel")
-    
-    info_placeholder = st.empty()
-    info_placeholder.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ...")
-
-    with st.sidebar:
-        st.header("ตัวเลือก")
-        bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)", "กรุงเทพ (BBL)"])
-        pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
-        password_pdf = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
-        convert_button = st.button("เริ่มการแปลงไฟล์")
-        
+      
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -715,7 +685,23 @@ def parse_bbl_pdf(pdf_stream):
     return all_rows
 
 # ================= 5. Streamlit UI & Export =================
-st.title("📑 PDF Statement to Excel")
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    login_page()
+    st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
+
+else:
+    # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
+    
+    # เพิ่มปุ่ม Logout ที่ Sidebar
+    if st.sidebar.button("Log out"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+    st.title("📑 PDF Statement to Excel")
+    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ")
 
 info_placeholder = st.empty()
 info_placeholder.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
