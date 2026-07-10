@@ -23,15 +23,23 @@ def login_page():
     """หน้าจอ Login แบบ Standalone"""
     st.title("🔐 Login to PDF Converter")
     
+    # เช็คว่ามีการตั้งค่า passwords ใน secrets หรือยัง
+    if "passwords" not in st.secrets:
+        st.error("⚠️ ยังไม่ได้ตั้งค่า [passwords] ใน Streamlit Secrets")
+        st.info("กรุณาไปที่ Settings > Secrets แล้วเพิ่มส่วน [passwords]")
+        return
+
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submit = st.form_submit_button("Login")
         
         if submit:
-            if username in st.secrets["passwords"] and password == st.secrets["passwords"][username]:
+            # ใช้ .get() เพื่อป้องกัน KeyError
+            user_db = st.secrets["passwords"]
+            if username in user_db and password == user_db[username]:
                 st.session_state["authenticated"] = True
-                st.rerun() # รีเฟรชหน้าเว็บเพื่อเข้าหน้าหลัก
+                st.rerun()
             else:
                 st.error("❌ Username หรือ Password ไม่ถูกต้อง")
 
