@@ -1351,19 +1351,16 @@ with st.sidebar:
     
     st.divider() # เส้นคั่นบางๆ
 
-    # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
-    # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
+    # --- จุดที่แสดงชื่อผู้ใช้ (Sidebar Footer) ---
     user_col, logout_col = st.columns([2, 1])
-
     with user_col:
-        # ดึงชื่อจาก session_state ถ้าไม่มีให้แสดงเป็น Guest
+        # ดึงชื่อจาก session_state ที่เก็บไว้ตอน Login
         current_user = st.session_state.get("username", "Guest")
-        st.markdown(f"👤 **{current_user}**") # แสดงชื่อ User ที่ใช้ Login จริง
-
+        st.markdown(f"👤 **{current_user}**")
     with logout_col:
-        if st.button("Log out", key="logout_btn"):
-            st.session_state.clear()
-            st.rerun()
+        if st.button("Logout"):
+             st.session_state.clear()
+             st.rerun()
 
 if convert_button:
     if not pdf_files:
