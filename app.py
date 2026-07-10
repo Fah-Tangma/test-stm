@@ -701,10 +701,9 @@ else:
         st.rerun()
 
     st.title("📑 PDF Statement to Excel")
-    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ")
+    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
 info_placeholder = st.empty()
-info_placeholder.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
 with st.sidebar:
     st.header("ตัวเลือก")
