@@ -699,36 +699,34 @@ if not st.session_state["authenticated"]:
 
 else:
  # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
-    st.markdown(
-        """
-        <style>
-        /* 1. กำหนดให้ Container ของส่วนท้ายติดหนึบที่ขอบล่างซ้าย */
-        .sidebar-footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 336px; /* ความกว้างมาตรฐาน Sidebar ของ Streamlit */
-            background-color: #11151c; /* สีพื้นหลังให้ตรงกับธีมของคุณ */
-            padding: 15px 20px;
-            border-top: 1px solid #333;
-            z-index: 999999;
-        }
+st.markdown(
+    """
+    <style>
+    /* 1. ปรับแต่งส่วนท้ายให้กว้างเท่า Sidebar เป๊ะๆ */
+    [data-testid="stSidebar"] > div:first-child {
+        padding-bottom: 80px; /* เว้นที่ว่างด้านล่าง */
+    }
+
+    .sidebar-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 21rem; /* ความกว้างมาตรฐานของ Sidebar Streamlit */
+        background-color: #11151c; /* สีพื้นหลังเดียวกับ Sidebar */
+        padding: 15px 20px;
+        border-top: 1px solid #333;
+        z-index: 999;
+    }
     
-        /* 2. ดันเนื้อหา Sidebar ปกติขึ้นไป ไม่ให้โดน Footer ทับ */
-        [data-testid="stSidebarUserContent"] {
-            padding-bottom: 80px !important;
-        }
-    
-        /* 3. จัดการ Layout ภายใน Footer ให้เป็นแถวเดียว */
-        .footer-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    .footer-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
@@ -750,28 +748,26 @@ with st.sidebar:
         f"""
         <div class="sidebar-footer">
             <div class="footer-content">
-                <div style="color: white; font-size: 14px;">
-                    👤 <b>Admin User</b>
+                <div style="color: white; font-size: 14px; display: flex; align-items: center;">
+                    <span style="margin-right: 8px;">👤</span> <b>Admin User</b>
                 </div>
-                <div>
-                    <a href="/?logout=true" target="_self">
-                        <button style="
-                            background-color: #262730;
-                            color: white;
-                            border: 1px solid #444;
-                            padding: 4px 12px;
-                            border-radius: 5px;
-                            cursor: pointer;
-                            font-size: 13px;
-                        ">Log out</button>
-                    </a>
-                </div>
+                <a href="/?logout=true" target="_self" style="text-decoration: none;">
+                    <button style="
+                        background-color: #262730;
+                        color: white;
+                        border: 1px solid #444;
+                        padding: 6px 14px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        transition: 0.3s;
+                    ">Log out</button>
+                </a>
             </div>
         </div>
         """,
         unsafe_allow_html=True
     )
-    
     st.divider() # เส้นคั่นบางๆ
 
     # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
