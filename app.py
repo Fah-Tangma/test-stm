@@ -18,50 +18,53 @@ import streamlit as st
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
 
 # ================= Authentication Logic =================
-def check_password():
-    """Returns `True` if the user had the correct password."""
-
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if st.session_state["username"] in st.secrets["passwords"] and \
-           st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # ลบรหัสออกจาก session เพื่อความปลอดภัย
-            del st.session_state["username"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # แสดงหน้าจอ Login
-        st.title("🔐 Login to PDF Converter")
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        st.button("Login", on_click=password_entered)
-        return False
-    elif not st.session_state["password_correct"]:
-        # กรณีรหัสผิด
-        st.title("🔐 Login to PDF Converter")
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        st.button("Login", on_click=password_entered)
-        st.error("😕 Username หรือ Password ไม่ถูกต้อง")
-        return False
-    else:
-        # รหัสถูกต้อง
-        return True
-
-# เรียกใช้งานฟังก์ชันตรวจสอบรหัสผ่าน
-if check_password():
-    # --- ถ้าผ่าน Login ให้แสดงเนื้อหาหลักของโปรแกรมทั้งหมด ---
+# ================= 1. ฟังก์ชันตรวจสอบ Login =================
+def login_page():
+    """หน้าจอ Login แบบ Standalone"""
+    st.title("🔐 Login to PDF Converter")
     
-    # วางส่วน Header และ Sidebar ของคุณที่นี่
-    st.title("📑 PDF Statement to Excel")
-    
-    # เพิ่มปุ่ม Logout (แถมให้)
-    if st.sidebar.button("Logout"):
-        st.session_state.clear()
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
+        
+        if submit:
+            if username in st.secrets["passwords"] and password == st.secrets["passwords"][username]:
+                st.session_state["authenticated"] = True
+                st.rerun() # รีเฟรชหน้าเว็บเพื่อเข้าหน้าหลัก
+            else:
+                st.error("❌ Username หรือ Password ไม่ถูกต้อง")
+
+# ================= 2. เริ่มต้นการทำงาน =================
+
+# ตรวจสอบสถานะการ Login ใน Session State
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# --- กรณีที่ยังไม่ผ่าน Login ---
+if not st.session_state["authenticated"]:
+    login_page()
+    st.stop()  # **สำคัญมาก: หยุดการทำงานของโค้ดที่เหลือทั้งหมดไว้ที่นี่**
+
+# --- กรณีที่ Login ผ่านแล้ว โค้ดส่วนข้างล่างนี้ถึงจะทำงาน ---
+else:
+    # เพิ่มปุ่ม Logout ไว้ที่ Sidebar
+    if st.sidebar.button("Log out"):
+        st.session_state["authenticated"] = False
         st.rerun()
 
+    # --- ส่วน UI แปลงไฟล์เดิมของคุณเริ่มจากตรงนี้ ---
+    st.title("📑 PDF Statement to Excel")
+    
+    info_placeholder = st.empty()
+    info_placeholder.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ...")
+
+    with st.sidebar:
+        st.header("ตัวเลือก")
+        bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)", "กรุงเทพ (BBL)"])
+        pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
+        password_pdf = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
+        convert_button = st.button("เริ่มการแปลงไฟล์")
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
