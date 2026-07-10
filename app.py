@@ -693,34 +693,41 @@ if not st.session_state["authenticated"]:
     st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
 
 else:
-    # 1. เพิ่ม CSS ไว้ด้านบนสุด (หลังการ import) เพื่อจัดการ Layout ของ Sidebar
+ # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
     st.markdown("""
-    <style>
-    /* ปรับแต่งโครงสร้าง Sidebar ให้ยืดเต็มความสูง */
-    [data-testid="stSidebarUserContent"] {
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-    }
-
-    /* ดันเนื้อหาส่วนนี้ให้ไปอยู่ล่างสุด */
-    .st-emotion-cache-16idsys {
-        flex-grow: 1;
-    }
-
-    .pinned-footer {
-        margin-top: auto; /* ดันลงล่างสุด */
-        padding-top: 10px;
-        padding-bottom: 20px;
-    }
+        <style>
+        /* ปรับแต่ง Container หลักของ Sidebar */
+        [data-testid="stSidebarUserContent"] {
+            display: flex;
+            flex-direction: column;
+            height: 100vh; /* บังคับความสูงให้เต็มหน้าจอ */
+        }
     
-    /* สไตล์เส้นกั้นบางๆ */
-    .thin-line {
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 15px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+        /* ดันเนื้อหาด้านบน (ตัวเลือกต่างๆ) ให้ขยายตัวเพื่อดัน Footer ลงข้างล่าง */
+        [data-testid="stSidebarUserContent"] > div:first-child {
+            flex: 1;
+        }
+    
+        /* สไตล์ของส่วน Footer (Admin + Log out) */
+        .sidebar-footer {
+            padding-bottom: 20px;
+            padding-top: 10px;
+        }
+    
+        /* สไตล์เส้นกั้นบางๆ */
+        .footer-line {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 15px;
+        }
+        
+        /* ปรับระยะห่างปุ่ม Log out ให้เล็กลง */
+        .stButton > button {
+            height: 32px;
+            padding-top: 0px;
+            padding-bottom: 0px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
