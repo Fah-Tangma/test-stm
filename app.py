@@ -688,8 +688,9 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+# เช็คการ Logout จากปุ่ม HTML
 if st.query_params.get("logout") == "true":
-    st.session_state.clear()
+    st.session_state["authenticated"] = False
     st.query_params.clear()
     st.rerun()
     
@@ -699,34 +700,34 @@ if not st.session_state["authenticated"]:
 
 else:
  # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
-st.markdown(
-    """
-    <style>
-    /* 1. ปรับแต่งส่วนท้ายให้กว้างเท่า Sidebar เป๊ะๆ */
-    [data-testid="stSidebar"] > div:first-child {
-        padding-bottom: 80px; /* เว้นที่ว่างด้านล่าง */
-    }
-
-    .sidebar-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 21rem; /* ความกว้างมาตรฐานของ Sidebar Streamlit */
-        background-color: #11151c; /* สีพื้นหลังเดียวกับ Sidebar */
-        padding: 15px 20px;
-        border-top: 1px solid #333;
-        z-index: 999;
-    }
+    st.markdown(
+        """
+        <style>
+        /* 1. ปรับแต่งส่วนท้ายให้กว้างเท่า Sidebar เป๊ะๆ */
+        [data-testid="stSidebar"] > div:first-child {
+            padding-bottom: 80px; /* เว้นที่ว่างด้านล่าง */
+        }
     
-    .footer-content {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+        .sidebar-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 21rem; /* ความกว้างมาตรฐานของ Sidebar Streamlit */
+            background-color: #11151c; /* สีพื้นหลังเดียวกับ Sidebar */
+            padding: 15px 20px;
+            border-top: 1px solid #333;
+            z-index: 999;
+        }
+        
+        .footer-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
