@@ -734,10 +734,31 @@ with st.sidebar:
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
     convert_button = st.button("เริ่มการแปลงไฟล์", use_container_width=True)
+
+    # เว้นที่ว่างเพื่อให้แน่ใจว่า Footer ไม่ทับเนื้อหา (เลือกใช้ตัวใดตัวหนึ่ง)
+    # st.write(" " * 50) 
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
-    # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
-    st.markdown("<br>" * 10, unsafe_allow_html=True) 
+     st.markdown(
+            """
+            <div class="sidebar-footer">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="color: white; font-size: 14px;">
+                        👤 <b>Admin User</b>
+                    </div>
+                    <button style="
+                        background-color: #262730;
+                        color: white;
+                        border: 1px solid #444;
+                        padding: 5px 12px;
+                        border-radius: 5px;
+                        cursor: pointer;
+                        font-size: 13px;
+                    ">Log out</button>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
     
     st.divider() # เส้นคั่นบางๆ
 
