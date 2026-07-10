@@ -65,6 +65,7 @@ else:
         pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
         password_pdf = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
         convert_button = st.button("เริ่มการแปลงไฟล์")
+        
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
