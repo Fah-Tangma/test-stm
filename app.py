@@ -1299,10 +1299,6 @@ if not st.session_state["authenticated"]:
 else:
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     
-    # เพิ่มปุ่ม Logout ที่ Sidebar
-    if st.sidebar.button("Log out"):
-        st.session_state["authenticated"] = False
-        st.rerun()
 
     st.title("📑 PDF Statement to Excel")
     st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
