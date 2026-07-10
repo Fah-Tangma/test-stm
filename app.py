@@ -710,7 +710,7 @@ with st.sidebar:
     bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)", "กรุงเทพ (BBL)"])
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
-    convert_button = st.button("เริ่มการแปลงไฟล์", , use_container_width=True))
+    convert_button = st.button("เริ่มการแปลงไฟล์", , use_container_width=True)
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
     # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
