@@ -688,25 +688,34 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+# --- เช็คการ Logout จากปุ่ม HTML (วางไว้ส่วนบนของ script) ---
+ if st.query_params.get("logout") == "true":
+    st.session_state["authenticated"] = False
+    st.query_params.clear()
+    st.rerun()
+
  if not st.session_state["authenticated"]:
     login_page()
     st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
 
 else:
  # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
+    else:
+    # --- 1. CSS สำหรับ Fixed Footer ล่างซ้ายสุด ---
     st.markdown(
         """
         <style>
-        /* 1. ปรับแต่งส่วนท้ายให้กว้างเท่า Sidebar เป๊ะๆ */
-        [data-testid="stSidebar"] > div:first-child {
-            padding-bottom: 80px; /* เว้นที่ว่างด้านล่าง */
+        /* 1. เว้นที่ว่างด้านล่างของเนื้อหา Sidebar เพื่อไม่ให้โดน Footer ทับ */
+        [data-testid="stSidebarUserContent"] {
+            padding-bottom: 80px !important;
         }
     
+        /* 2. กำหนดให้ Container ของส่วนท้ายติดหนึบที่ขอบล่างซ้ายและกว้างเท่า Sidebar */
         .sidebar-footer {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 21rem; /* ความกว้างมาตรฐานของ Sidebar Streamlit */
+            width: 21rem; /* ขนาดความกว้างมาตรฐานของ Sidebar ใน Streamlit */
             background-color: #11151c; /* สีพื้นหลังเดียวกับ Sidebar */
             padding: 15px 20px;
             border-top: 1px solid #333;
@@ -722,6 +731,43 @@ else:
         """,
         unsafe_allow_html=True
     )
+    
+    st.title("📑 PDF Statement to Excel")
+    st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
+
+    with st.sidebar:
+        st.header("ตัวเลือก")
+        bank_option = st.selectbox("เลือกธนาคาร", ["กสิกรไทย (KBank)", "ไทยพาณิชย์ (SCB)", "กรุงไทย (KTB)", "กรุงศรี (BAY)", "กรุงเทพ (BBL)"])
+        pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
+        password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
+        convert_button = st.button("เริ่มการแปลงไฟล์", use_container_width=True)
+
+        # --- ส่วนที่ย้ายมาล่างซ้ายสุด (มีแค่จุดเดียวและกว้างเท่าแถบข้างพอดี) ---
+        st.markdown(
+            f"""
+            <div class="sidebar-footer">
+                <div class="footer-content">
+                    <div style="color: white; font-size: 14px; display: flex; align-items: center;">
+                        <span style="margin-right: 8px;">👤</span> <b>Admin User</b>
+                    </div>
+                    <a href="/?logout=true" target="_self" style="text-decoration: none;">
+                        <button style="
+                            background-color: #262730;
+                            color: white;
+                            border: 1px solid #444;
+                            padding: 6px 14px;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            font-size: 13px;
+                            transition: 0.3s;
+                        ">Log out</button>
+                    </a>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        # ลบ st.divider(), user_col, logout_col ของเก่าออกไปแล้ว
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
@@ -763,7 +809,6 @@ with st.sidebar:
         """,
         unsafe_allow_html=True
     )
-    st.divider() # เส้นคั่นบางๆ
 
     # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
     # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
