@@ -727,7 +727,7 @@ with st.sidebar:
         st.markdown("👤 **Admin User**")
 
     with logout_col:
-        if st.button("Log out", key="logout_btn", size="small"):
+        if st.button("Log out", key="logout_btn"):
             # เพิ่ม Logic การ Logout ตรงนี้ (เช่น ล้าง session)
             st.session_state.clear()
             st.rerun()
