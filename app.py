@@ -715,8 +715,6 @@ else:
     st.title("📑 PDF Statement to Excel")
     st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
-info_placeholder = st.empty()
-
 
 with st.sidebar:
     st.header("ตัวเลือก")
@@ -727,9 +725,7 @@ with st.sidebar:
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
     # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
-     st.markdown('<div class="sidebar-footer">', unsafe_allow_html=True)
-    
-    st.divider() # เส้นคั่นบางๆ
+    st.markdown('</div>', unsafe_allow_html=True) # ปิด Tag ภายใน sidebar
 
     # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
     # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
