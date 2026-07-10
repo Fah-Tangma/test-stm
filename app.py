@@ -688,6 +688,11 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
+if st.query_params.get("logout") == "true":
+    st.session_state.clear()
+    st.query_params.clear()
+    st.rerun()
+    
 if not st.session_state["authenticated"]:
     login_page()
     st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
@@ -697,40 +702,28 @@ else:
     st.markdown(
         """
         <style>
-        /* ปรับแต่งความกว้างของ Sidebar ให้พอดีกับเนื้อหา */
-        [data-testid="stSidebar"] {
-            background-color: #11151c;
-        }
-    
-        /* สร้าง Container สำหรับส่วนท้าย (Fixed) */
+        /* 1. กำหนดให้ Container ของส่วนท้ายติดหนึบที่ขอบล่างซ้าย */
         .sidebar-footer {
             position: fixed;
             bottom: 0;
             left: 0;
-            width: 21rem; /* ขนาดมาตรฐานของ sidebar streamlit */
-            background-color: #11151c; 
+            width: 336px; /* ความกว้างมาตรฐาน Sidebar ของ Streamlit */
+            background-color: #11151c; /* สีพื้นหลังให้ตรงกับธีมของคุณ */
             padding: 15px 20px;
             border-top: 1px solid #333;
-            z-index: 999;
+            z-index: 999999;
+        }
+    
+        /* 2. ดันเนื้อหา Sidebar ปกติขึ้นไป ไม่ให้โดน Footer ทับ */
+        [data-testid="stSidebarUserContent"] {
+            padding-bottom: 80px !important;
+        }
+    
+        /* 3. จัดการ Layout ภายใน Footer ให้เป็นแถวเดียว */
+        .footer-content {
             display: flex;
             justify-content: space-between;
             align-items: center;
-        }
-    
-        /* ระยะห่างด้านล่างของเมนูปกติ เพื่อไม่ให้ Footer บัง */
-        [data-testid="stSidebarUserContent"] {
-            padding-bottom: 100px;
-        }
-    
-        /* ซ่อนแถบ scrollbar แนวนอนถ้ามี */
-        [data-testid="stSidebar"] > div:first-child {
-            overflow-x: hidden;
-        }
-        
-        /* ตกแต่งปุ่ม Logout ของ Streamlit ให้ดูแบนราบ (Flat) เพื่อประหยัดพื้นที่ */
-        .stButton > button {
-            width: 100%;
-            border-radius: 5px;
         }
         </style>
         """,
@@ -753,7 +746,31 @@ with st.sidebar:
     # st.write(" " * 50) 
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="sidebar-footer">
+            <div class="footer-content">
+                <div style="color: white; font-size: 14px;">
+                    👤 <b>Admin User</b>
+                </div>
+                <div>
+                    <a href="/?logout=true" target="_self">
+                        <button style="
+                            background-color: #262730;
+                            color: white;
+                            border: 1px solid #444;
+                            padding: 4px 12px;
+                            border-radius: 5px;
+                            cursor: pointer;
+                            font-size: 13px;
+                        ">Log out</button>
+                    </a>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     
     st.divider() # เส้นคั่นบางๆ
 
