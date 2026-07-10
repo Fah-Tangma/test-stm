@@ -12,9 +12,55 @@ from google import genai
 from google.genai import types
 import os
 import unicodedata  # เพิ่มสำหรับล้างคำภาษาไทย BBL
+import streamlit as st
 
 # ตั้งค่าหน้าเว็บ Streamlit
 st.set_page_config(page_title="PDF Statement Converter", layout="wide")
+
+# ================= Authentication Logic =================
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["username"] in st.secrets["passwords"] and \
+           st.session_state["password"] == st.secrets["passwords"][st.session_state["username"]]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # ลบรหัสออกจาก session เพื่อความปลอดภัย
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # แสดงหน้าจอ Login
+        st.title("🔐 Login to PDF Converter")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Login", on_click=password_entered)
+        return False
+    elif not st.session_state["password_correct"]:
+        # กรณีรหัสผิด
+        st.title("🔐 Login to PDF Converter")
+        st.text_input("Username", key="username")
+        st.text_input("Password", type="password", key="password")
+        st.button("Login", on_click=password_entered)
+        st.error("😕 Username หรือ Password ไม่ถูกต้อง")
+        return False
+    else:
+        # รหัสถูกต้อง
+        return True
+
+# เรียกใช้งานฟังก์ชันตรวจสอบรหัสผ่าน
+if check_password():
+    # --- ถ้าผ่าน Login ให้แสดงเนื้อหาหลักของโปรแกรมทั้งหมด ---
+    
+    # วางส่วน Header และ Sidebar ของคุณที่นี่
+    st.title("📑 PDF Statement to Excel")
+    
+    # เพิ่มปุ่ม Logout (แถมให้)
+    if st.sidebar.button("Logout"):
+        st.session_state.clear()
+        st.rerun()
 
 # ================= 0. AI Configuration (สำหรับ BAY) =================
 # แนะนำให้ใช้ st.secrets หรือใส่ใน Sidebar เพื่อความปลอดภัย
