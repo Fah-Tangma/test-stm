@@ -697,19 +697,26 @@ else:
     st.markdown(
     """
     <style>
-    /* ทำให้ Sidebar อยู่กับที่ (Fixed) */
-    [data-testid="stSidebar"] {
+    /* สร้าง Container สำหรับส่วนท้ายของ Sidebar */
+    .sidebar-footer {
         position: fixed;
-        top: 0;
-        left: 0;
         bottom: 0;
-        height: 100vh;
-        overflow-y: auto; /* ให้เลื่อนเฉพาะใน Sidebar ได้ถ้าเมนูยาวเกินหน้าจอ */
+        left: 0;
+        width: 260px; /* ความกว้างปกติของ Sidebar Streamlit */
+        background-color: #11151c; /* ปรับสีให้กลมกลืนกับ Theme ของคุณ */
+        padding: 15px 20px;
+        border-top: 1px solid #333;
+        z-index: 999;
+    }
+    
+    /* ปรับช่องว่างด้านล่างของเนื้อหา Sidebar ปกติ ไม่ให้โดน Footer ทับ */
+    [data-testid="stSidebarUserContent"] {
+        padding-bottom: 80px;
     }
 
-    /* ปรับแต่งส่วนเนื้อหาหลักไม่ให้โดนทับ (ถ้าจำเป็น) */
-    [data-testid="stAppViewContainer"] {
-        margin-left: 0; 
+    /* ซ่อนแถบเลื่อน (Scrollbar) ของ Sidebar ถ้าไม่จำเป็น */
+    [data-testid="stSidebar"] > div:first-child {
+        overflow-y: auto;
     }
     </style>
     """,
