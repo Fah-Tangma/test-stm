@@ -688,13 +688,7 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# เช็คการ Logout จากปุ่ม HTML
-if st.query_params.get("logout") == "true":
-    st.session_state["authenticated"] = False
-    st.query_params.clear()
-    st.rerun()
-    
-if not st.session_state["authenticated"]:
+ if not st.session_state["authenticated"]:
     login_page()
     st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
 
