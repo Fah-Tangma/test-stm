@@ -1292,52 +1292,22 @@ def parse_bbl_pdf(pdf_stream):
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# เช็ค Logout จาก query parameter
-if st.query_params.get("logout") == "true":
-    st.session_state["authenticated"] = False
-    st.query_params.clear()
-    st.rerun()
-
 if not st.session_state["authenticated"]:
     login_page()
-    st.stop()
+    st.stop() # หยุดทำงานที่นี่ถ้ายังไม่ Login
 
 else:
-    # --- CSS ปรับแต่งความกว้างและตรึง Footer ด้านล่างสุด ---
-    st.markdown(
-        """
-        <style>
-        /* 1. เว้นที่ว่างด้านล่างของเมนู เพื่อไม่ให้โดนแถบ Admin บังเวลาเลื่อนลงสุด */
-        [data-testid="stSidebarUserContent"] {
-            padding-bottom: 80px !important;
-        }
+    # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     
-        /* 2. ปรับแต่งแถบ Footer ให้กว้างเท่า Sidebar (336px คือค่ามาตรฐาน) */
-        .sidebar-footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 336px; /* ความกว้างมาตรฐานของ Sidebar */
-            background-color: #11151c; /* สีพื้นหลังเดียวกับธีมมืด */
-            padding: 15px 20px;
-            border-top: 1px solid #333;
-            z-index: 9999;
-            box-sizing: border-box; /* ทำให้ padding ไม่เพิ่มความกว้างเกิน */
-        }
-        
-        .footer-content {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    
+    # เพิ่มปุ่ม Logout ที่ Sidebar
+    if st.sidebar.button("Log out"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
     st.title("📑 PDF Statement to Excel")
     st.info("อัพโหลดไฟล์ PDF ระบบจะรวมข้อมูลเข้าด้วยกันตามลำดับ (รองรับ KBank, SCB, KTB และ BAY ด้วย AI)")
 
+info_placeholder = st.empty()
 
 with st.sidebar:
     st.header("ตัวเลือก")
@@ -1345,32 +1315,26 @@ with st.sidebar:
     pdf_files = st.file_uploader("เลือกไฟล์ PDF", type="pdf", accept_multiple_files=True)
     password = st.text_input("รหัสผ่านไฟล์ (ถ้ามี)", type="password")
     convert_button = st.button("เริ่มการแปลงไฟล์", use_container_width=True)
+    
+    # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
+    # ใช้สเปซว่างๆ เพื่อดัน User info ลงไปข้างล่างสุด
+    st.markdown("<br>" * 10, unsafe_allow_html=True) 
+    
+    st.divider() # เส้นคั่นบางๆ
 
-    # --- ส่วน Footer ด้านล่างสุด (ชิดล่างซ้าย และกว้างเท่าแถบเมนู) ---
-    st.markdown(
-        f"""
-        <div class="sidebar-footer">
-            <div class="footer-content">
-                <div style="color: white; font-size: 14px; display: flex; align-items: center;">
-                    <span style="margin-right: 8px;">👤</span> <b>Admin User</b>
-                </div>
-                <a href="/?logout=true" target="_self" style="text-decoration: none;">
-                    <button style="
-                        background-color: #262730;
-                        color: white;
-                        border: 1px solid #444;
-                        padding: 6px 14px;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        font-size: 13px;
-                        transition: 0.3s;
-                    ">Log out</button>
-                </a>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    # --- ส่วนที่เพิ่มใหม่: ชื่อ User และ ปุ่ม Logout ---
+    # สร้าง 2 คอลัมน์: คอลัมน์แรกสำหรับชื่อ (กว้างกว่า), คอลัมน์สองสำหรับปุ่ม (แคบกว่า)
+    user_col, logout_col = st.columns([2, 1])
+
+    with user_col:
+        # สมมติชื่อ User เป็น 'Admin' (คุณสามารถเปลี่ยนเป็นตัวแปรจากระบบ Login ได้)
+        st.markdown("👤 **Admin User**")
+
+    with logout_col:
+        if st.button("Log out", key="logout_btn"):
+            # เพิ่ม Logic การ Logout ตรงนี้ (เช่น ล้าง session)
+            st.session_state.clear()
+            st.rerun()
 
 if convert_button:
     if not pdf_files:
@@ -1387,16 +1351,19 @@ if convert_button:
                 
                 pdf_bytes = uploaded_file.read()
                 
+                # --- แยกเงื่อนไขสำหรับ BAY (ใช้ AI) ---
                 if bank_option == "กรุงศรี (BAY)":
                     data_rows = process_bay_with_gemini(pdf_bytes, password)
                     if data_rows:
                         header = ["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"]
                         df = pd.DataFrame(data_rows, columns=header)
+                        # แปลงวันที่จาก AI ให้เป็น Datetime (AI มักส่งมาเป็น dd/mm/yyyy หรือ yyyy-mm-dd)
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         df["ถอนเงิน/ฝากเงิน"] = pd.to_numeric(df["ถอนเงิน/ฝากเงิน"], errors='coerce')
                         df["ยอดคงเหลือ"] = pd.to_numeric(df["ยอดคงเหลือ"], errors='coerce')
                         all_dfs.append(df)
                 
+                # --- เงื่อนไขธนาคารอื่นๆ (ใช้ Rule-based) ---
                 else:
                     with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                         unlocked_io = io.BytesIO()
@@ -1426,28 +1393,40 @@ if convert_button:
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
                 
+                # ตรวจสอบว่าคอลัมน์ "วันที่" เป็น datetime หรือยัง (ถ้ามีแถวว่างให้ลบออกก่อนแสดงผล)
                 st.dataframe(final_df, use_container_width=True)
 
+                # Export Excel
                 output = io.BytesIO()
+                # กำหนด datetime_format ใน ExcelWriter เพื่อความชัวร์ชั้นแรก
                 with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     final_df.to_excel(writer, index=False, sheet_name='Statement')
                     workbook = writer.book
                     worksheet = writer.sheets['Statement']
 
+                    # สีตามธนาคาร
                     colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0', "กรุงศรี (BAY)": '#FFCC00', "กรุงเทพ (BBL)": '#0A22A8'}
                     h_color = colors.get(bank_option, '#333333')
                     f_color = 'black' if bank_option == "กรุงศรี (BAY)" else 'white'
                     
+                    # สร้าง Format ต่างๆ
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
                     num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
+                    # Format พิเศษสำหรับวันที่ m/d/yyyy
                     date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                     
+                    # เขียน Header พร้อมสี
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
                     
+                    # ตั้งค่าความกว้างคอลัมน์ทั้งหมดเบื้องต้น
                     worksheet.set_column('A:Z', 18)
+                    
+                    # --- บังคับ Format วันที่ (คอลัมน์ A) ---
                     worksheet.set_column('A:A', 15, date_fmt)
 
+                    # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
+                    # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
                     for idx, col_name in enumerate(final_df.columns):
                         if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี"]):
                             worksheet.set_column(idx, idx, 15, num_fmt)
@@ -1461,3 +1440,4 @@ if convert_button:
             st.error("❌ รหัสผ่านไม่ถูกต้อง")
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+
