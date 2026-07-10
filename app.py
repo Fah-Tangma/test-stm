@@ -695,33 +695,47 @@ if not st.session_state["authenticated"]:
 else:
  # --- 1. CSS สำหรับดันทุกอย่างขึ้น และตรึง Footer ไว้ล่างสุด ---
     st.markdown(
-    """
-    <style>
-    /* สร้าง Container สำหรับส่วนท้ายของ Sidebar */
-    .sidebar-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 260px; /* ความกว้างปกติของ Sidebar Streamlit */
-        background-color: #11151c; /* ปรับสีให้กลมกลืนกับ Theme ของคุณ */
-        padding: 15px 20px;
-        border-top: 1px solid #333;
-        z-index: 999;
-    }
+        """
+        <style>
+        /* ปรับแต่งความกว้างของ Sidebar ให้พอดีกับเนื้อหา */
+        [data-testid="stSidebar"] {
+            background-color: #11151c;
+        }
     
-    /* ปรับช่องว่างด้านล่างของเนื้อหา Sidebar ปกติ ไม่ให้โดน Footer ทับ */
-    [data-testid="stSidebarUserContent"] {
-        padding-bottom: 80px;
-    }
-
-    /* ซ่อนแถบเลื่อน (Scrollbar) ของ Sidebar ถ้าไม่จำเป็น */
-    [data-testid="stSidebar"] > div:first-child {
-        overflow-y: auto;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+        /* สร้าง Container สำหรับส่วนท้าย (Fixed) */
+        .sidebar-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 21rem; /* ขนาดมาตรฐานของ sidebar streamlit */
+            background-color: #11151c; 
+            padding: 15px 20px;
+            border-top: 1px solid #333;
+            z-index: 999;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    
+        /* ระยะห่างด้านล่างของเมนูปกติ เพื่อไม่ให้ Footer บัง */
+        [data-testid="stSidebarUserContent"] {
+            padding-bottom: 100px;
+        }
+    
+        /* ซ่อนแถบ scrollbar แนวนอนถ้ามี */
+        [data-testid="stSidebar"] > div:first-child {
+            overflow-x: hidden;
+        }
+        
+        /* ตกแต่งปุ่ม Logout ของ Streamlit ให้ดูแบนราบ (Flat) เพื่อประหยัดพื้นที่ */
+        .stButton > button {
+            width: 100%;
+            border-radius: 5px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     # --- ส่วน UI จะทำงานเฉพาะเมื่อ Login ผ่านแล้ว และมีเพียงชุดเดียวเท่านั้น ---
     st.title("📑 PDF Statement to Excel")
@@ -739,26 +753,7 @@ with st.sidebar:
     # st.write(" " * 50) 
     
     # --- ส่วนที่เพิ่มใหม่: ดันเนื้อหาลงไปด้านล่าง (Spacer) ---
-     st.markdown(
-            """
-            <div class="sidebar-footer">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div style="color: white; font-size: 14px;">
-                        👤 <b>Admin User</b>
-                    </div>
-                    <button style="
-                        background-color: #262730;
-                        color: white;
-                        border: 1px solid #444;
-                        padding: 5px 12px;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        font-size: 13px;
-                    ">Log out</button>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+    st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider() # เส้นคั่นบางๆ
 
