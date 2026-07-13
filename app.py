@@ -697,17 +697,29 @@ if convert_button:
                         unlocked_io = io.BytesIO(); pdf.save(unlocked_io); unlocked_io.seek(0)
                         
                         if bank_option == "กสิกรไทย (KBank)":
+                            rows = parse_kbank_pdf(unlocked_io)
                             all_dfs.append(pd.DataFrame(parse_kbank_pdf(unlocked_io), columns=["วันที่", "เวลา", "รายการ", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง", "รายละเอียด"]))
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d-%m-%y', errors='coerce')
                         elif bank_option == "ไทยพาณิชย์ (SCB)":
+                            rows = parse_kbank_pdf(unlocked_io)
                             all_dfs.append(pd.DataFrame(parse_scb_pdf(unlocked_io), columns=["วันที่", "เวลา", "รายการ", "ช่องทาง", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รายละเอียด"]))
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         elif bank_option == "กรุงไทย (KTB)":
+                            rows = parse_kbank_pdf(unlocked_io)
                             all_dfs.append(pd.DataFrame(parse_ktb_pdf(unlocked_io), columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ภาษี", "ยอดคงเหลือ", "สาขา"]))
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         elif bank_option == "กรุงเทพ (BBL)":
-                            all_dfs.append(pd.DataFrame(parse_bbl_pdf(unlocked_io), columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"]))
+                            rows.reverse() 
+                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
+                            df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
+                            df['วันที่ที่มีผล'] = pd.to_datetime(df['วันที่ที่มีผล'], format='%d/%m/%Y', errors='coerce')
                         elif bank_option == "ยูโอบี (UOB)":
                             raw_uob = parse_uob_pdf(unlocked_io)
                             uob_data = [[r["st_date"], r["val_date"], r["tx_date"], r["tx_time"], clean_description(r["desc"]), (r["deposit"] - r["withdrawal"]), r["balance"]] for r in raw_uob]
                             all_dfs.append(pd.DataFrame(uob_data, columns=["Statement Date", "Value Date", "Transaction Date", "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"]))
+                            df['Statement Date'] = pd.to_datetime(df['Statement Date'], format='%d/%m/%Y', errors='coerce')
+                            df['Value Date'] = pd.to_datetime(df['Value Date'], format='%d/%m/%Y', errors='coerce')
+                            df['Transaction Date'] = pd.to_datetime(df['Transaction Date'], format='%d/%m/%Y', errors='coerce')
                 except PasswordError: st.error(f"❌ รหัสผ่านไฟล์ {uploaded_file.name} ไม่ถูกต้อง")
 
         if all_dfs:
