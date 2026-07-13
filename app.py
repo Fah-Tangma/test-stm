@@ -604,20 +604,6 @@ def process_bbl_with_gemini(file_bytes, password):
         st.error(f"Gemini Error (BBL): {str(e)}")
         return None
 
-# --- ส่วนในตัว Convert Button สำหรับ BBL ---
-elif bank_option == "กรุงเทพ (BBL)":
-    data_rows = process_bbl_with_gemini(pdf_bytes, password)
-    if data_rows:
-        df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
-        
-        # เติมวันที่ที่ว่างลงมา (ในกรณี AI ลืมใส่ให้ครบ)
-        df['วันที่'] = df['วันที่'].replace('', None).ffill()
-        df['วันที่มีผล'] = df['วันที่มีผล'].replace('', None).ffill()
-        
-        # แปลงเป็น datetime เพื่อให้ Excel รู้ว่าเป็นวันที่
-        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
-        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], format='%d/%m/%Y', errors='coerce')
-
 # ================= 4. Streamlit UI & Logic =================
 st.title("📑 PDF Statement to Excel")
 
@@ -651,8 +637,15 @@ if convert_button:
                 elif bank_option == "กรุงเทพ (BBL)":
                     data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
-                        df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
+                        
+                        # เติมวันที่ที่ว่างลงมา (ในกรณี AI ลืมใส่ให้ครบ)
+                        df['วันที่'] = df['วันที่'].replace('', None).ffill()
+                        df['วันที่มีผล'] = df['วันที่มีผล'].replace('', None).ffill()
+                        
+                        # แปลงเป็น datetime เพื่อให้ Excel รู้ว่าเป็นวันที่
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], format='%d/%m/%Y', errors='coerce')
 
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
