@@ -258,155 +258,114 @@ def parse_kbank_pdf(pdf_stream):
     return final_filtered_rows
 
 # ===== 2.SCB =====
+# ===== 4.BBL =====
+def clean_thai_text(text):
+    if not text: return ""
+    text = unicodedata.normalize('NFKC', text)
+    # ลบช่องว่างกลางคำ
+    text = re.sub(r'(?<=[ก-ฮ])\s+(?=[ะ-ูเ-โ])', '', text)
+    text = re.sub(r'(?<=[ะ-ูเ-โ])\s+(?=[ก-ฮะ-์])', '', text)
+    # แก้คำซ้ำ Artifact
+    text = re.sub(r'([ก-ฮ][ะ-์])\1', r'\1', text) 
+    text = re.sub(r'([ก-ฮ]{2})\1', r'\1', text)
+
+    corrections = {
+        "เงนิ": "เงิน", "เงิ น": "เงิน", "บญั": "บัญ", "บญัชี": "บัญชี", "อตั": "อัต",
+        "โนมัตั ิ": "โนมัติ", "โนมตัิ": "โนมัติ", "โนมัติมัติ": "โนมัติ", "อตั โนมตั ิ": "อัตโนมัติ",
+        "ตดั": "ตัด", "ดดั": "ตัด", "ตัดเตั": "ตัด", "เช็คอตั": "เช็คอัต", "ธรรมเน ยีม": "ธรรมเนียม",
+        "คา่": "ค่า", "ไม่ผ่ าน": "ไม่ผ่าน", "ไม่ผ่ม่ าน": "ไม่ผ่าน", "ผ่ าน": "ผ่าน", "ผ่ม่ าน": "ผ่าน",
+        "สะสมทรัพรั": "สะสมทรัพย์", "ทรัพรั ย์": "ทรัพย์", "ทรัพย": "ทรัพย์", "ปรบั": "ปรับ", "ปรับปรั รุง": "ปรับปรุง",
+        "เป็ น": "เป็น", "ผ่ น": "ผ่าน", "ทํารายการ": "ทำรายการ", "ทีทำ": "ที่ทำ", "ทีมี": "ที่มี",
+        "ไมผ่ า่ น": "ไม่ผ่าน", "ผา่ น": "ผ่าน", "ค่า ธรรมเนียม": "ค่าธรรมเนียม","ไม่ผ่านเป็น ผ่าน": "ไม่ผ่านเป็นผ่าน",
+        "เป็น ": "เป็น",
+        "ทรพัย์": "ทรัพย์"
+    }
+    for wrong, right in corrections.items():
+        text = text.replace(wrong, right)
+    return re.sub(r'\s+', ' ', text).strip()
+
+def thai_date_to_eng(thai_date_str):
+    months = {"ม.ค.": "01", "ก.พ.": "02", "มี.ค.": "03", "เม.ย.": "04", "พ.ค.": "05", "มิ.ย.": "06",
+              "ก.ค.": "07", "ส.ค.": "08", "ก.ย.": "09", "ต.ค.": "10", "พ.ย.": "11", "ธ.ค.": "12"}
+    try:
+        parts = thai_date_str.split()
+        if len(parts) == 3:
+            d, m, y = parts[0].zfill(2), months.get(parts[1], "01"), str(int(parts[2]) - 543)
+            return f"{d}/{m}/{y}"
+    except: return None
+
 def str_to_float(val):
-    if not val or not isinstance(val, str): return 0.0
-    return float(val.replace(',', ''))
+    if not val: return 0.0
+    try:
+        if isinstance(val, str):
+            val = val.replace(',', '')
+        return float(val)
+    except: return 0.0
 
-def parse_scb_pdf(pdf_stream):
-    all_parsed_rows = []
-    header_found = False
-    pending_desc = ""
+# ================= 2. Logic การอ่านไฟล์ BBL =================
 
-    # คีย์เวิร์ดสำหรับยอดยกมา (ใช้ตัวใหญ่ทั้งหมดเพื่อเทียบ .upper())
-    bf_keywords = ["ยอดยกมา", "BALANCE BROUGHT FORWARD", "ยอดเงินคงเหลือยกมา"]
+def parse_bbl_pdf(pdf_stream):
+    all_rows = []
+    date_pattern = r'(\d{1,2}\s+(?:ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s+\d{4})'
+    time_pattern = r'(\d{2}:\d{2})'
     
-    table_headers = [
-        "Date", "Time", "Code", "Channel", "Cheque No.", "Withdrawal", "Deposit", "Description",
-        "Debit/Credit", "Balance/Baht", "วันที่", "เวลา", "รายการ", "ช่องทาง", "ยอดเงินคงเหลือ"
-    ]
-
-# รวมคำที่ไม่สนใจทั้งหมด (หัวกระดาษ, ท้ายกระดาษ, ข้อมูลบริษัท, Disclaimer)
-    ignore_keywords = table_headers + [
-        "This document is auto-generated", "signature is not required", 
-        "THE SIAM COMMERCIAL BANK PUBLIC COMPANY LIMITED", "สาขา ASAWANN SHOPPING COMPLEX",
-        "บริษัท เอสพี ริช กรุ๊ป จำกัด", "STATEMENT OF SAVING ACCOUNT", 
-        "เลขที่บัญชี", "ที่อยู่", "Account No.", "Address", "Name", "ชื่อ - สกุล",
-        "TOTAL ITEMS", "TOTAL AMOUNT", "TOTAL DEBIT", "TOTAL CREDIT",
-        "กรุณาติดต่อศูนย์บริการลูกค้าธุรกิจ", "02-722-2222", "Contact Center",
-        "computer-generated", "authorized person", "signature of SCB",
-        "หน้าที่", "Page", "เอกสารฉบับนี้", "จัดพิมพ์ผ่านระบบคอมพิวเตอร์",
-        "Balance Carried Forward", "ยอดเงินคงเหลือยกไป", "ธนาคารไทยพาณิชย์", "จำกัด", "(มหาชน)", "จำนวนเงินนำเข้าบัญชีทั้งหมด", 
-        "Total Credit Amount", "จำนวนเงินที่หักบัญชีทั้งหมด", "Total Debit Amount"
-    ]
-
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
-            text = page.extract_text()
-            if not text: continue
-            lines = text.split('\n')
-            
-            for line in lines:
-                line_clean = line.strip()
-                if not line_clean: continue
+            lines = page.extract_text(x_tolerance=2, y_tolerance=2).split('\n')
+            for i, line in enumerate(lines):
+                line = line.strip()
+                date_matches = re.findall(date_pattern, line)
+                if not date_matches: continue
+                if any(k in line for k in ["สรุปยอด", "รายการเคลื่อนไหว", "เลขที่บัญชี", "ยอดยกมา"]): continue
 
-                # --- 1. เช็คยอดยกมา (BF) เป็นอันดับแรก ---
-                if any(kw.upper() in line_clean.upper() for kw in bf_keywords):
-                    amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line_clean)
-                    if amounts:
-                        # ยอดยกมามักจะเป็นยอดเงินสุดท้ายของบรรทัดนี้
-                        balance = str_to_float(amounts[-1])
-                        all_parsed_rows.append([None, None, "B/F", "-", 0.0, balance, "ยอดยกมา (BALANCE BROUGHT FORWARD)"])
-                    header_found = True # เมื่อเจอยอดยกมาแล้ว ถือว่าเริ่มตารางแล้ว
-                    continue
-
-                # --- 2. เช็คหัวตาราง เพื่อเริ่มอ่านข้อมูลในหน้าใหม่ๆ ---
-                if ("Date" in line_clean and "Time" in line_clean) or ("วันที่" in line_clean and "เวลา" in line_clean):
-                    header_found = True
-                    continue 
-
-                if not header_found:
-                    continue
-
-                # --- 3. ข้ามบรรทัดที่ไม่ใช่ข้อมูล (Header ซ้ำ/Footer) ---
-                if any(kw in line_clean for kw in ignore_keywords):
-                    continue
-
-                # --- 4. อ่านรายการ Transaction ---
-                # Regex ตรวจวันที่ (DD/MM/YY หรือ DD/MM/YYYY) และ เวลา (HH:MM)
-                transaction_match = re.match(r'^(\d{2}/\d{2}/\d{2,4})\s+(\d{2}:\d{2})', line_clean)
+                time_val, extra_desc = "", ""
+                time_in_line = re.search(time_pattern, line)
+                if time_in_line: time_val = time_in_line.group(1)
                 
-                if transaction_match:
-                    date_str = transaction_match.group(1)
-                    time_str = transaction_match.group(2)
-                    
-                    amounts = re.findall(r'(\d{1,3}(?:,\d{3})*\.\d{2})', line_clean)
-                    
-                    temp_text = line_clean.replace(date_str, "").replace(time_str, "").strip()
-                    parts = temp_text.split()
-                    
-                    code = parts[0] if len(parts) > 0 else "-"
-                    # ตรวจสอบว่าช่อง Channel มีข้อมูลไหม (ถ้าตัวถัดไปไม่ใช่ตัวเลขยอดเงิน)
-                    channel = parts[1] if len(parts) > 1 and not re.match(r'[\d,]+\.\d{2}', parts[1]) else "-"
-                    
-                    amount_val, balance_val = 0.0, 0.0
-                    if len(amounts) >= 2:
-                        balance_val = str_to_float(amounts[-1])
-                        raw_amount = str_to_float(amounts[-2])
-                        
-                        # แยกเงินเข้า (+) หรือเงินออก (-) ตาม Code
-                        # รหัสเงินเข้าพบบ่อย: X1, IN, IT, BT, DP, CR, SD, C1
-                        credit_codes = ['X1', 'IN', 'IT', 'BT', 'DP', 'CR', 'SD', 'C1', 'NR', 'TRN']
-                        if code.upper() in credit_codes:
-                            amount_val = raw_amount
-                        else:
-                            # รหัสเงินออกพบบ่อย: FE, WD, ATM, TR, DC, X2 (บางกรณี)
-                            amount_val = -raw_amount
-                    elif len(amounts) == 1:
-                        balance_val = str_to_float(amounts[0])
+                # อ่านบรรทัดถัดไปกรณีเวลาอยู่คนละบรรทัด
+                if i + 1 < len(lines):
+                    next_line = lines[i+1].strip()
+                    time_match_next = re.search(r'^(\d{2}:\d{2})', next_line)
+                    if time_match_next:
+                        time_val = time_match_next.group(1)
+                        extra_desc = next_line.replace(time_val, "").strip()
 
-                    # ตัดส่วนวันที่ เวลา รหัส และยอดเงินออก เพื่อให้เหลือแต่ Description
-                    desc_raw = line_clean.replace(date_str, "").replace(time_str, "").replace(code, "", 1)
-                    if channel != "-": desc_raw = desc_raw.replace(channel, "", 1)
-                    for amt in amounts: desc_raw = desc_raw.replace(amt, "")
-                    
-                    final_desc = (pending_desc + " " + desc_raw.strip()).strip()
-                    pending_desc = "" 
-                    
-                    all_parsed_rows.append([date_str, time_str, code, channel, amount_val, balance_val, final_desc])
+                amounts = re.findall(r'[\d,]+\.\d{2}', line)
+                if not amounts: continue
                 
-                # --- 5. เก็บรายละเอียดที่อยู่คนละบรรทัด ---
-                elif all_parsed_rows:
-                    # ถ้าเจอคำหลักที่เป็นจุดเริ่มรายละเอียด
-                    keywords_desc = ("รับโอนจาก", "โอนไป", "รับเงินโอน", "ชำระเงิน", "จากระบบ", "ค่าธรรมเนียม", "PromptPay", "TO ", "FROM ")
-                    if line_clean.startswith(keywords_desc):
-                        pending_desc = (pending_desc + " " + line_clean).strip()
+                cheque_no = ""
+                cheque_match = re.search(r'\b(\d{7,8})\b', line)
+                if cheque_match: cheque_no = cheque_match.group(1)
+
+                channel = ""
+                chan_match = re.search(r'\b(BR\d+|DR\d+|AUTO|TELE|M-BANKING|INTERNET)\b', line)
+                if chan_match: channel = chan_match.group(1)
+
+                # ล้าง Text เพื่อเอาแค่ Description
+                temp_desc = line
+                for d_raw in date_matches: temp_desc = temp_desc.replace(d_raw, "")
+                for amt in amounts: temp_desc = temp_desc.replace(amt, "")
+                if channel: temp_desc = temp_desc.replace(channel, "")
+                if cheque_no: temp_desc = temp_desc.replace(cheque_no, "")
+
+                full_desc = clean_thai_text(temp_desc + " " + extra_desc)
+                balance = str_to_float(amounts[-1])
+                
+                transaction_amount = 0.0
+                if len(amounts) >= 2:
+                    val = str_to_float(amounts[-2])
+                    # แยกฝาก/ถอน
+                    if any(word in full_desc for word in ["ฝาก", "เข้า", "รับโอน", "คืน", "ดอกเบี้ย"]):
+                        transaction_amount = val
                     else:
-                        # กรณีเป็นข้อความรายละเอียดทั่วไป ให้ต่อท้ายรายการล่าสุด
-                        all_parsed_rows[-1][6] = (all_parsed_rows[-1][6] + " " + line_clean).strip()
+                        transaction_amount = -val
 
-     # --- ส่วนของการกรองข้อมูล (คงโครงสร้างเดิมตามที่คุณต้องการ) ---
-    temp_list_bf = []
-    found_first_bf = False
-    for row in all_parsed_rows:
-        is_bf_row = any(kw in str(row[2]) for kw in bf_keywords)
-        if is_bf_row:
-            if not found_first_bf:
-                temp_list_bf.append(row)
-                found_first_bf = True
-        else:
-            temp_list_bf.append(row)
+                date_trans = thai_date_to_eng(date_matches[0])
+                date_eff = thai_date_to_eng(date_matches[1]) if len(date_matches) > 1 else date_trans
+                
+                all_rows.append([date_trans, time_val, date_eff, full_desc, cheque_no, transaction_amount, balance, channel])
+    return all_rows
 
-    final_filtered_rows = []
-    i, n = 0, len(temp_list_bf)
-    while i < n:
-        if temp_list_bf[i][3] is not None:
-            final_filtered_rows.append(temp_list_bf[i])
-            i += 1
-        else:
-            empty_block = []
-            while i < n and temp_list_bf[i][3] is None:
-                # ถ้าเจอรายการยอดยกมาในบล็อกว่าง ให้เก็บไว้
-                if any(kw in str(temp_list_bf[i][2]) for kw in bf_keywords):
-                    final_filtered_rows.append(temp_list_bf[i])
-                    i += 1
-                    continue
-                empty_block.append(temp_list_bf[i])
-                i += 1
-            # รวบรายละเอียดเสริม (ถ้ามีมากกว่า 1 บรรทัดก็ยังคงนำไปแสดงผล)
-            for item in empty_block:
-                final_filtered_rows.append(item)
-            
-    return final_filtered_rows
 
 # ===== 3.KTB =====
 def parse_ktb_pdf(pdf_stream):
