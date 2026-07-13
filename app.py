@@ -633,8 +633,7 @@ if convert_button:
                     if data_rows:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                
-                 elif bank_option == "กรุงเทพ (BBL)":
+                elif bank_option == "กรุงเทพ (BBL)":
                     data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
                         # 1. สร้าง DataFrame
@@ -662,7 +661,7 @@ if convert_button:
                 
                         # 6. แปลงวันที่เป็น Format สวยงามสำหรับแสดงผล
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                                     
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                                    
                         
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
