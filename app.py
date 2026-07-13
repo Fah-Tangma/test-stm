@@ -723,23 +723,34 @@ if convert_button:
                 colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0', "กรุงศรี (BAY)": '#FFCC00', "กรุงเทพ (BBL)": '#0A22A8', "ยูโอบี (UOB)": '#003399'}
                 h_color = colors.get(bank_option, '#333333')
                 
-                header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white' if bank_option != "กรุงศรี (BAY)" else 'black', 'align': 'center', 'border': 1})
-                num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right'})
-                 # Format พิเศษสำหรับวันที่ m/d/yyyy
-                date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
-                
-                for col_num, value in enumerate(final_df.columns.values):
-                    worksheet.write(0, col_num, value, header_fmt)
+# สร้าง Format ต่างๆ
+                    header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
+                    # Format พิเศษสำหรับวันที่ m/d/yyyy
+                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
+                    
+                    # เขียน Header พร้อมสี
+                    for col_num, value in enumerate(final_df.columns.values):
+                        worksheet.write(0, col_num, value, header_fmt)
+                    
+                    # ตั้งค่าความกว้างคอลัมน์ทั้งหมดเบื้องต้น
+                    worksheet.set_column('A:Z', 18)
+                    
+                    # --- บังคับ Format วันที่ (คอลัมน์ A) ---
+                    worksheet.set_column('A:A', 15, date_fmt)
 
-                # --- บังคับ Format วันที่ (คอลัมน์ A) ---
-                worksheet.set_column('A:A', 15, date_fmt)
-                
-                worksheet.set_column('A:Z', 18)
-                # Apply number format to specific columns
-                for idx, col in enumerate(final_df.columns):
-                    if any(kw in col for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "Deposit/Withdrawal", "Balance"]):
-                        worksheet.set_column(idx, idx, 18, num_fmt)
+                    # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
+                    # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
+                    for idx, col_name in enumerate(final_df.columns):
+                        if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี"]):
+                            worksheet.set_column(idx, idx, 15, num_fmt)
 
-            output.seek(0)
-            st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, file_name=f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx")
-            status.success("✅ แปลงไฟล์สำเร็จ!")
+                output.seek(0)
+                st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, 
+                                 file_name=f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+                status_placeholder.success("✅ แปลงไฟล์สำเร็จ!")
+
+        except PasswordError:
+            st.error("❌ รหัสผ่านไม่ถูกต้อง")
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
