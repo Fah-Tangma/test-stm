@@ -724,26 +724,26 @@ if convert_button:
                 h_color = colors.get(bank_option, '#333333')
                 
 # สร้าง Format ต่างๆ
-                    header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
-                    # Format พิเศษสำหรับวันที่ m/d/yyyy
-                    date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
+                header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
+                num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
+                # Format พิเศษสำหรับวันที่ m/d/yyyy
+                date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                     
-                    # เขียน Header พร้อมสี
-                    for col_num, value in enumerate(final_df.columns.values):
-                        worksheet.write(0, col_num, value, header_fmt)
+                # เขียน Header พร้อมสี
+                for col_num, value in enumerate(final_df.columns.values):
+                     worksheet.write(0, col_num, value, header_fmt)
                     
-                    # ตั้งค่าความกว้างคอลัมน์ทั้งหมดเบื้องต้น
-                    worksheet.set_column('A:Z', 18)
+                 # ตั้งค่าความกว้างคอลัมน์ทั้งหมดเบื้องต้น
+                worksheet.set_column('A:Z', 18)
                     
-                    # --- บังคับ Format วันที่ (คอลัมน์ A) ---
-                    worksheet.set_column('A:A', 15, date_fmt)
+                # --- บังคับ Format วันที่ (คอลัมน์ A) ---
+                 worksheet.set_column('A:A', 15, date_fmt)
 
-                    # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
-                    # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
-                    for idx, col_name in enumerate(final_df.columns):
-                        if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี"]):
-                            worksheet.set_column(idx, idx, 15, num_fmt)
+                 # --- บังคับ Format ตัวเลข (ถอน/ฝาก และ ยอดคงเหลือ) ---
+                 # หาตำแหน่งคอลัมน์ที่มีคำว่า "ถอน" หรือ "ยอดคงเหลือ"
+                 for idx, col_name in enumerate(final_df.columns):
+                       if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี"]):
+                          worksheet.set_column(idx, idx, 15, num_fmt)
 
                 output.seek(0)
                 st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, 
