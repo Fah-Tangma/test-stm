@@ -622,24 +622,22 @@ if convert_button:
             for i, uploaded_file in enumerate(pdf_files):
                 status_placeholder.write(f"⏳ กำลังประมวลผล: {uploaded_file.name}...")
                 pdf_bytes = uploaded_file.read()
-                
-                # --- กรณี BAY (AI) ---
+                df = None  # กำหนดค่าเริ่มต้นเพื่อป้องกัน Error 'df' is not defined
+
+                # --- 1. กลุ่มธนาคารที่ใช้ AI (BAY และ BBL) ---
                 if bank_option == "กรุงศรี (BAY)":
                     data_rows = process_bay_with_gemini(pdf_bytes, password)
                     if data_rows:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                        all_dfs.append(df)
-                      
-                    elif bank_option == "กรุงเทพ (BBL)":
-                        data_rows = process_bbl_with_gemini(pdf_bytes, password)
+                
+                elif bank_option == "กรุงเทพ (BBL)":
+                    data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
-                        # กำหนดคอลัมน์ตาม Prompt ของ BBL
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                        all_dfs.append(df)  
-                
-                # --- กรณีธนาคารอื่นๆ (Rule-based) ---
+
+                # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
                     with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
                         unlocked_io = io.BytesIO()
@@ -660,75 +658,52 @@ if convert_button:
                             rows = parse_ktb_pdf(unlocked_io)
                             df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ภาษี", "ยอดคงเหลือ", "สาขา"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                                              
+                        
                         elif bank_option == "ยูโอบี (UOB)":
                             raw_uob = parse_uob_pdf(unlocked_io)
-                            # สร้างข้อมูลตามหัวตารางที่กำหนด
                             uob_data = [[
                                 r["st_date"], r["val_date"], r["tx_date"], 
                                 r["tx_time"], clean_description(r["desc"]), 
                                 (r["deposit"] - r["withdrawal"]), r["balance"]
                             ] for r in raw_uob]
-                            
-                            df = pd.DataFrame(uob_data, columns=[
-                                "Statement Date", "Value Date", "Transaction Date", 
-                                "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"
-                            ])
-                            # แปลงวันที่สำหรับ UOB
+                            df = pd.DataFrame(uob_data, columns=["Statement Date", "Value Date", "Transaction Date", "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"])
                             df['Statement Date'] = pd.to_datetime(df['Statement Date'], format='%d/%m/%Y', errors='coerce')
                             df['Value Date'] = pd.to_datetime(df['Value Date'], format='%d/%m/%Y', errors='coerce')
                             df['Transaction Date'] = pd.to_datetime(df['Transaction Date'], format='%d/%m/%Y', errors='coerce')
-                        
-                        all_dfs.append(df)
+
+                # ตรวจสอบว่า df ถูกสร้างสำเร็จหรือไม่ก่อน append
+                if df is not None:
+                    all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
                 st.dataframe(final_df, use_container_width=True)
 
-                # --- Export Excel ---
+                # --- ส่วน Export Excel (โค้ดส่วนนี้เหมือนเดิมทุกประการ) ---
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
                     final_df.to_excel(writer, index=False, sheet_name='Statement')
                     workbook = writer.book
                     worksheet = writer.sheets['Statement']
-
-                    # สีตามธนาคาร
-                    colors = {
-                        "กสิกรไทย (KBank)": '#00A950', 
-                        "ไทยพาณิชย์ (SCB)": '#4E2E7F', 
-                        "กรุงไทย (KTB)": '#00A1E0', 
-                        "กรุงศรี (BAY)": '#FFCC00', 
-                        "กรุงเทพ (BBL)": '#0A22A8', 
-                        "ยูโอบี (UOB)": '#003399'
-                    }
+                    
+                    colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0', "กรุงศรี (BAY)": '#FFCC00', "กรุงเทพ (BBL)": '#0A22A8', "ยูโอบี (UOB)": '#003399'}
                     h_color = colors.get(bank_option, '#333333')
-                    # กำหนดสีฟอนต์ (BAY ใช้สีดำ, อื่นๆ ใช้สีขาว)
                     f_color = 'black' if bank_option == "กรุงศรี (BAY)" else 'white'
                     
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': f_color, 'align': 'center', 'border': 1})
                     num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right', 'valign': 'vcenter'})
                     date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                     
-                    # เขียน Header
                     for col_num, value in enumerate(final_df.columns.values):
                         worksheet.write(0, col_num, value, header_fmt)
-                    
                     worksheet.set_column('A:Z', 18)
-                    
-                    # จัด Format วันที่ (คอลัมน์ที่มีคำว่า Date หรือ วันที่)
                     for idx, col_name in enumerate(final_df.columns):
-                        if "Date" in col_name or "วันที่" in col_name:
-                            worksheet.set_column(idx, idx, 15, date_fmt)
-                        # จัด Format ตัวเลข
+                        if "Date" in col_name or "วันที่" in col_name: worksheet.set_column(idx, idx, 15, date_fmt)
                         if any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี", "Deposit/Withdrawal", "Balance"]):
                             worksheet.set_column(idx, idx, 15, num_fmt)
 
                 output.seek(0)
-                st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์ Excel", 
-                    data=output, 
-                    file_name=f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                )
+                st.download_button(label="📥 ดาวน์โหลดไฟล์ Excel", data=output, file_name=f"Statement_{bank_option}_{datetime.now().strftime('%Y%m%d')}.xlsx")
                 status_placeholder.success("✅ แปลงไฟล์สำเร็จ!")
 
         except PasswordError:
