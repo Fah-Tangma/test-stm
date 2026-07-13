@@ -633,37 +633,57 @@ if convert_button:
                     if data_rows:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                # --- ในส่วนของ elif bank_option == "กรุงเทพ (BBL)": ---
                 elif bank_option == "กรุงเทพ (BBL)":
                     data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
-                        # 1. สร้าง DataFrame
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         
-                        # 2. ลบแถวขยะที่อาจติดมา
+                        # 1. ลบแถวหัวตารางขยะ
                         df = df[df['เวลา'] != 'เวลา'] 
                 
-                        # 3. จัดการคอมมาและแปลงเป็นตัวเลข (เพื่อให้คำนวณและแสดงผลไม่เพี้ยน)
-                        for col in ['ถอนเงิน/ฝากเงิน', 'ยอดคงเหลือ']:
-                            df[col] = df[col].astype(str).str.replace(',', '')
-                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
-                        # 4. จัดการวันที่ (เติมค่าว่าง และเตรียมสำหรับการเรียงลำดับ)
+                        # 2. จัดการวันที่
                         df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
-                        
-                        # สร้างคอลัมน์ชั่วคราวเพื่อใช้เรียงลำดับ (วันที่ + เวลา)
-                        df['temp_sort'] = pd.to_datetime(df['วันที่'] + ' ' + df['เวลา'], dayfirst=True, errors='coerce')
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True, errors='coerce')
                 
-                        # 5. *** เรียงลำดับจากเก่าไปใหม่ (Oldest to Newest) ***
-                        # การเรียงแบบ ascending=True จะเอาวันที่ 02/06 ไว้บนสุด และ 26/06 ไว้ล่างสุด
-                        # ทำให้ยอดคงเหลือไล่เรียงกันไปตามลำดับเวลาจริง
-                        df = df.sort_values(by='temp_sort', ascending=True).reset_index(drop=True)
-                        
-                        # ลบคอลัมน์ชั่วคราวทิ้ง
-                        df = df.drop(columns=['temp_sort'])
-                
-                        # 6. แปลงวันที่เป็นรูปแบบ dd/mm/yyyy เพื่อความสวยงามใน Excel
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                               
+                        # 3. *** จุดสำคัญ: แปลงคอลัมน์เงินให้เป็นตัวเลข (Numeric) ***
+                        df['ถอนเงิน/ฝากเงิน'] = pd.to_numeric(df['ถอนเงิน/ฝากเงิน'], errors='coerce').fillna(0)
+                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)
+
+
+# --- ในส่วนของ Export Excel (pd.ExcelWriter) ---
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine='xlsxwriter', datetime_format='m/d/yyyy') as writer:
+    final_df.to_excel(writer, index=False, sheet_name='Statement')
+    workbook = writer.book
+    worksheet = writer.sheets['Statement']
+    
+    # ... (ส่วนตั้งค่าสี Header เหมือนเดิม) ...
+
+    # --- ตั้งค่า Format ตัวเลขแบบบัญชีตามที่คุณระบุ ---
+    acc_num_format = '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)'
+    num_fmt = workbook.add_format({
+        'num_format': acc_num_format,
+        'align': 'right',
+        'valign': 'vcenter',
+        'font_name': 'Arial',
+        'font_size': 10
+    })
+    
+    date_fmt = workbook.add_format({'num_format': 'dd/mm/yyyy', 'align': 'left'})
+    
+    # วนลูปตั้งค่าแต่ละคอลัมน์
+    for idx, col_name in enumerate(final_df.columns):
+        # ถ้าเป็นคอลัมน์วันที่
+        if "Date" in col_name or "วันที่" in col_name:
+            worksheet.set_column(idx, idx, 15, date_fmt)
+        
+        # ถ้าเป็นคอลัมน์ตัวเลข (เพิ่มเงื่อนไขให้ครอบคลุมทุกธนาคาร)
+        elif any(kw in col_name for kw in ["ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "จำนวนเงิน", "ภาษี", "Deposit/Withdrawal", "Balance"]):
+            worksheet.set_column(idx, idx, 18, num_fmt)
+        else:
+            worksheet.set_column(idx, idx, 25) # คอลัมน์อื่นๆ เช่น รายละเอียด ให้กว้างหน่อย                           
                         
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
