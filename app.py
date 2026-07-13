@@ -607,7 +607,7 @@ def str_to_float(val):
 
 # ================= 2. Logic การอ่านไฟล์ BBL =================
 
-def parse_bbl_pdf_fixed(pdf_stream):
+def parse_bbl_pdf(pdf_stream):
     all_rows = []
     # ปรับ Regex วันที่ให้ยืดหยุ่นขึ้น (รองรับตัวอักษรซ้ำที่อาจหลุดมา)
     date_pattern = r'(\d{1,2}\s+[ก-ธ\.\s]{3,10}\s+\d{4})'
