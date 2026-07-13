@@ -725,9 +725,14 @@ if convert_button:
                 
                 header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white' if bank_option != "กรุงศรี (BAY)" else 'black', 'align': 'center', 'border': 1})
                 num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right'})
+                 # Format พิเศษสำหรับวันที่ m/d/yyyy
+                date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                 
                 for col_num, value in enumerate(final_df.columns.values):
                     worksheet.write(0, col_num, value, header_fmt)
+
+                # --- บังคับ Format วันที่ (คอลัมน์ A) ---
+                worksheet.set_column('A:A', 15, date_fmt)
                 
                 worksheet.set_column('A:Z', 18)
                 # Apply number format to specific columns
