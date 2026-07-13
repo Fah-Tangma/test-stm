@@ -639,14 +639,18 @@ if convert_button:
                     if data_rows:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         
-                        # เติมวันที่ที่ว่างลงมา (ในกรณี AI ลืมใส่ให้ครบ)
-                        df['วันที่'] = df['วันที่'].replace('', None).ffill()
-                        df['วันที่มีผล'] = df['วันที่มีผล'].replace('', None).ffill()
+                        # 1. ลบแถวหัวตารางขยะ
+                        df = df[df['เวลา'] != 'เวลา'] 
+                
+                        # 2. จัดการวันที่
+                        df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True, errors='coerce')
+                
+                        # 3. *** จุดสำคัญ: แปลงคอลัมน์เงินให้เป็นตัวเลข (Numeric) ***
+                        df['ถอนเงิน/ฝากเงิน'] = pd.to_numeric(df['ถอนเงิน/ฝากเงิน'], errors='coerce').fillna(0)
+                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)
                         
-                        # แปลงเป็น datetime เพื่อให้ Excel รู้ว่าเป็นวันที่
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], format='%d/%m/%Y', errors='coerce')
-
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
                     with pikepdf.open(io.BytesIO(pdf_bytes), password=password) as pdf:
