@@ -527,111 +527,137 @@ import unicodedata
 def clean_thai_text(text):
     if not text: return ""
     text = unicodedata.normalize('NFKC', text)
-    
-    # 1. แก้ไข Artifact เฉพาะของ BBL (ตัวอักษรซ้ำ/ซ้อน)
-    # แก้ "มิ.มิย." -> "มิ.ย.", "เม.เมย." -> "เม.ย."
+    # ลบตัวซ้อน Artifact ของ BBL (เช่น มิ.มิย. -> มิ.ย.)
     text = re.sub(r'([ก-ฮ]\.[ก-ฮ]\.)\1', r'\1', text)
-    # แก้ "บัญบั ชี" -> "บัญชี"
     text = re.sub(r'([ก-ฮ])[\u0e30-\u0e4c]\1', r'\1', text) 
     
-    # 2. ลบช่องว่างกลางคำที่แตกออกมา
-    text = re.sub(r'(?<=[ก-ฮ])\s+(?=[ะ-ูเ-โ])', '', text)
-    text = re.sub(r'(?<=[ะ-ูเ-โ])\s+(?=[ก-ฮะ-์])', '', text)
-
+    # แก้คำผิดเฉพาะจุด
     corrections = {
-        "เงนิ": "เงิน", "เงิ น": "เงิน", "บญั": "บัญ", "บญัชี": "บัญชี", "อตั": "อัต",
-        "โนมัตั ิ": "โนมัติ", "โนมตัิ": "โนมัติ", "โนมัติมัติ": "โนมัติ", "อตั โนมตั ิ": "อัตโนมัติ",
-        "ตดั": "ตัด", "ดดั": "ตัด", "ตัดเตั": "ตัด", "เช็คอตั": "เช็คอัต", "ธรรมเน ยีม": "ธรรมเนียม",
-        "คา่": "ค่า", "ไม่ผ่ าน": "ไม่ผ่าน", "ไม่ผ่ม่ าน": "ไม่ผ่าน", "ผ่ าน": "ผ่าน", "ผ่ม่ าน": "ผ่าน",
-        "สะสมทรัพรั": "สะสมทรัพย์", "ทรัพรั ย์": "ทรัพย์", "ทรัพย": "ทรัพย์", "ปรบั": "ปรับ", "ปรับปรั รุง": "ปรับปรุง",
-        "เป็ น": "เป็น", "ผ่ น": "ผ่าน", "ทํารายการ": "ทำรายการ", "ทีทำ": "ที่ทำ", "ทีมี": "ที่มี",
-        "ค่า ธรรมเนียม": "ค่าธรรมเนียม", "ทรพัย์": "ทรัพย์", "มิ.มิย.": "มิ.ย.", "เม.เมย.": "เม.ย."
+        "มิ.มิย.": "มิ.ย.", "เม.เมย.": "เม.ย.", "พ.พ.ค.": "พ.ค.",
+        "เงนิ": "เงิน", "บญั": "บัญ", "คา่": "ค่า", "ตดั": "ตัด"
     }
     for wrong, right in corrections.items():
         text = text.replace(wrong, right)
+    
     return re.sub(r'\s+', ' ', text).strip()
 
 def thai_date_to_eng(thai_date_str):
+    if not thai_date_str: return None
     months = {"ม.ค.": "01", "ก.พ.": "02", "มี.ค.": "03", "เม.ย.": "04", "พ.ค.": "05", "มิ.ย.": "06",
               "ก.ค.": "07", "ส.ค.": "08", "ก.ย.": "09", "ต.ค.": "10", "พ.ย.": "11", "ธ.ค.": "12"}
     try:
-        # ตัดตัวอักษรขยะหลังปีออก (เช่น '2569 มิ' -> '2569')
+        # ตัดเศษอักษรหลังปี เช่น "2569 มิ" -> "2569"
         thai_date_str = re.sub(r'(\d{4}).*', r'\1', thai_date_str)
         parts = thai_date_str.split()
         if len(parts) >= 3:
-            d, m, y = parts[0].zfill(2), months.get(parts[1], "01"), str(int(parts[2]) - 543)
+            d = parts[0].zfill(2)
+            m = months.get(parts[1], "01")
+            y = str(int(parts[2]) - 543)
             return f"{d}/{m}/{y}"
     except: return None
-
-def parse_bbl_pdf(pdf_stream):
-    all_rows = []
-    # ปรับ Regex วันที่ให้ยืดหยุ่นขึ้น ไม่จำเป็นต้องจบด้วยปีทันที เผื่อมีตัวอักษรซ้ำติดมา
-    date_pattern = r'(\d{1,2}\s+[ก-ธ\.\s]{3,10}\s+\d{4})'
-    time_pattern = r'(\d{2}:\d{2})'
-    
-    with pdfplumber.open(pdf_stream) as pdf:
-        for page in pdf.pages:
-            # เพิ่ม y_tolerance เป็น 3 เพื่อช่วยรวมบรรทัดที่เยื้องเข้าด้วยกัน
-            lines = page.extract_text(x_tolerance=2, y_tolerance=3).split('\n')
-            for i, raw_line in enumerate(lines):
-                # *** จุดสำคัญ: ทำความสะอาดข้อความก่อนเช็ค Regex ***
-                line = clean_thai_text(raw_line.strip())
-                
-                date_matches = re.findall(date_pattern, line)
-                if not date_matches: continue
-                if any(k in line for k in ["สรุปยอด", "รายการเคลื่อนไหว", "เลขที่บัญชี", "ยอดยกมา"]): continue
-
-                time_val = ""
-                time_match = re.search(time_pattern, line)
-                if time_match:
-                    time_val = time_match.group(1)
-                elif i + 1 < len(lines):
-                    # ถ้าหาเวลาไม่เจอในบรรทัด ลองดูบรรทัดถัดไป
-                    next_line = clean_thai_text(lines[i+1])
-                    time_match_next = re.search(time_pattern, next_line)
-                    if time_match_next: time_val = time_match_next.group(1)
-
-                amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                if not amounts: continue
-                
-                cheque_no = ""
-                cheque_match = re.search(r'\b(\d{7,8})\b', line)
-                if cheque_match: cheque_no = cheque_match.group(1)
-
-                channel = ""
-                chan_match = re.search(r'\b(BR\d+|DR\d+|AUTO|TELE|M-BANKING|INTERNET)\b', line)
-                if chan_match: channel = chan_match.group(1)
-
-                # ล้างเพื่อเอา Description
-                temp_desc = line
-                for d_raw in date_matches: temp_desc = temp_desc.replace(d_raw, "")
-                for amt in amounts: temp_desc = temp_desc.replace(amt, "")
-                if channel: temp_desc = temp_desc.replace(channel, "")
-                if cheque_no: temp_desc = temp_desc.replace(cheque_no, "")
-
-                full_desc = clean_thai_text(temp_desc)
-                balance = str_to_float(amounts[-1])
-                
-                transaction_amount = 0.0
-                if len(amounts) >= 2:
-                    val = str_to_float(amounts[-2])
-                    # ตรวจสอบรายการฝาก
-                    if any(word in full_desc for word in ["ฝาก", "เข้า", "รับโอน", "คืน", "ดอกเบี้ย", "Clearing"]):
-                        transaction_amount = val
-                    else:
-                        transaction_amount = -val
-
-                date_trans = thai_date_to_eng(date_matches[0])
-                date_eff = thai_date_to_eng(date_matches[1]) if len(date_matches) > 1 else date_trans
-                
-                all_rows.append([date_trans, time_val, date_eff, full_desc, cheque_no, transaction_amount, balance, channel])
-    return all_rows
 
 def str_to_float(val):
     if not val: return 0.0
     try:
         return float(str(val).replace(',', ''))
     except: return 0.0
+
+# ================= Logic การอ่านไฟล์ BBL ที่ปรับปรุงใหม่ =================
+
+def parse_bbl_pdf(pdf_stream):
+    all_rows = []
+    # Regex ที่ยืดหยุ่นขึ้นเพื่อดักจับวันที่แม้มีตัวอักษรซ้ำ
+    date_pattern = r'(\d{1,2}\s+[ก-ธ\.\s]{3,10}\s+\d{4})'
+    time_pattern = r'(\d{2}:\d{2})'
+    amount_pattern = r'[\d,]+\.\d{2}'
+
+    with pdfplumber.open(pdf_stream) as pdf:
+        for page in pdf.pages:
+            # ใช้ y_tolerance=5 เพื่อรวมบรรทัดที่สายตาเราเห็นเป็นบรรทัดเดียวกันแต่ PDF แยกกัน
+            lines = page.extract_text(x_tolerance=3, y_tolerance=5).split('\n')
+            
+            row_buffer = None
+
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+
+                # ตรวจสอบว่าเป็นบรรทัดเริ่มต้นรายการใหม่ (มีวันที่)
+                date_matches = re.findall(date_pattern, line)
+                
+                if date_matches:
+                    # ถ้ามีข้อมูลเก่าค้างใน Buffer ให้บันทึกก่อนเริ่มรายการใหม่
+                    if row_buffer:
+                        process_buffer(row_buffer, all_rows)
+                    
+                    row_buffer = {
+                        'dates': date_matches,
+                        'text': line,
+                        'amounts': re.findall(amount_pattern, line),
+                        'time': ""
+                    }
+                    # หาเวลาในบรรทัดเดียวกัน
+                    time_search = re.search(time_pattern, line)
+                    if time_search: row_buffer['time'] = time_search.group(1)
+                
+                elif row_buffer:
+                    # ถ้าไม่มีวันที่ แต่มี Buffer ค้างอยู่ (แปลว่าเป็นบรรทัดรายละเอียดหรือเวลาของรายการก่อนหน้า)
+                    row_buffer['text'] += " " + line
+                    # หาตัวเลขเพิ่มเติม (เช่น ยอดคงเหลือที่อาจอยู่คนละบรรทัด)
+                    row_buffer['amounts'].extend(re.findall(amount_pattern, line))
+                    # หาเวลาถ้ายังไม่มี
+                    if not row_buffer['time']:
+                        time_search = re.search(time_pattern, line)
+                        if time_search: row_buffer['time'] = time_search.group(1)
+
+            # บันทึกรายการสุดท้ายของหน้า
+            if row_buffer:
+                process_buffer(row_buffer, all_rows)
+
+    return all_rows
+
+def process_buffer(buffer, all_rows):
+    """ทำความสะอาดและจัดระเบียบข้อมูลจาก Buffer ก่อนเพิ่มลง List"""
+    desc = clean_thai_text(buffer['text'])
+    
+    # ลบข้อมูลวันที่ออกจากรายละเอียดเพื่อความสะอาด
+    for d in buffer['dates']:
+        desc = desc.replace(d, "")
+    
+    # ลบตัวเลขเงินออกจากรายละเอียด
+    unique_amounts = []
+    for a in buffer['amounts']:
+        if a not in unique_amounts: unique_amounts.append(a)
+        desc = desc.replace(a, "")
+
+    # จัดการจำนวนเงิน
+    amounts_float = [str_to_float(a) for a in unique_amounts]
+    
+    if len(amounts_float) >= 1:
+        balance = amounts_float[-1] # ตัวสุดท้ายคือยอดคงเหลือเสมอ
+        trans_amount = amounts_float[-2] if len(amounts_float) >= 2 else 0.0
+        
+        # ค้นหาเลขเช็ค
+        cheque_no = ""
+        cheque_match = re.search(r'\b(\d{7,8})\b', buffer['text'])
+        if cheque_match: cheque_no = cheque_match.group(1)
+
+        # ค้นหาช่องทาง
+        channel = ""
+        chan_match = re.search(r'\b(BR\d+|AUTO|INTERNET|M-BANKING|DR\d+)\b', buffer['text'])
+        if chan_match: channel = chan_match.group(1)
+
+        # แยก ฝาก/ถอน (ดูจากคำสำคัญ)
+        if any(word in desc for word in ["ฝาก", "เข้า", "รับโอน", "คืน", "ดอกเบี้ย", "Clearing"]):
+            actual_amount = trans_amount
+        else:
+            actual_amount = -trans_amount
+
+        # แปลงวันที่
+        date_trans = thai_date_to_eng(buffer['dates'][0])
+        date_eff = thai_date_to_eng(buffer['dates'][1]) if len(buffer['dates']) > 1 else date_trans
+
+        all_rows.append([date_trans, buffer['time'], date_eff, desc.strip(), cheque_no, actual_amount, balance, channel])
 
 # ================= 4. Streamlit UI & Logic =================
 st.title("📑 PDF Statement to Excel")
