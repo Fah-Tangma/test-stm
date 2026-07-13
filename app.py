@@ -520,15 +520,23 @@ def parse_ktb_pdf(pdf_stream):
     return final_filtered_rows
 
 # ===== 4.BBL =====
+import re
+import pdfplumber
+import unicodedata
+
 def clean_thai_text(text):
     if not text: return ""
     text = unicodedata.normalize('NFKC', text)
-    # ลบช่องว่างกลางคำ
+    
+    # 1. แก้ไข Artifact เฉพาะของ BBL (ตัวอักษรซ้ำ/ซ้อน)
+    # แก้ "มิ.มิย." -> "มิ.ย.", "เม.เมย." -> "เม.ย."
+    text = re.sub(r'([ก-ฮ]\.[ก-ฮ]\.)\1', r'\1', text)
+    # แก้ "บัญบั ชี" -> "บัญชี"
+    text = re.sub(r'([ก-ฮ])[\u0e30-\u0e4c]\1', r'\1', text) 
+    
+    # 2. ลบช่องว่างกลางคำที่แตกออกมา
     text = re.sub(r'(?<=[ก-ฮ])\s+(?=[ะ-ูเ-โ])', '', text)
     text = re.sub(r'(?<=[ะ-ูเ-โ])\s+(?=[ก-ฮะ-์])', '', text)
-    # แก้คำซ้ำ Artifact
-    text = re.sub(r'([ก-ฮ][ะ-์])\1', r'\1', text) 
-    text = re.sub(r'([ก-ฮ]{2})\1', r'\1', text)
 
     corrections = {
         "เงนิ": "เงิน", "เงิ น": "เงิน", "บญั": "บัญ", "บญัชี": "บัญชี", "อตั": "อัต",
@@ -537,9 +545,7 @@ def clean_thai_text(text):
         "คา่": "ค่า", "ไม่ผ่ าน": "ไม่ผ่าน", "ไม่ผ่ม่ าน": "ไม่ผ่าน", "ผ่ าน": "ผ่าน", "ผ่ม่ าน": "ผ่าน",
         "สะสมทรัพรั": "สะสมทรัพย์", "ทรัพรั ย์": "ทรัพย์", "ทรัพย": "ทรัพย์", "ปรบั": "ปรับ", "ปรับปรั รุง": "ปรับปรุง",
         "เป็ น": "เป็น", "ผ่ น": "ผ่าน", "ทํารายการ": "ทำรายการ", "ทีทำ": "ที่ทำ", "ทีมี": "ที่มี",
-        "ไมผ่ า่ น": "ไม่ผ่าน", "ผา่ น": "ผ่าน", "ค่า ธรรมเนียม": "ค่าธรรมเนียม","ไม่ผ่านเป็น ผ่าน": "ไม่ผ่านเป็นผ่าน",
-        "เป็น ": "เป็น",
-        "ทรพัย์": "ทรัพย์"
+        "ค่า ธรรมเนียม": "ค่าธรรมเนียม", "ทรพัย์": "ทรัพย์", "มิ.มิย.": "มิ.ย.", "เม.เมย.": "เม.ย."
     }
     for wrong, right in corrections.items():
         text = text.replace(wrong, right)
@@ -549,47 +555,41 @@ def thai_date_to_eng(thai_date_str):
     months = {"ม.ค.": "01", "ก.พ.": "02", "มี.ค.": "03", "เม.ย.": "04", "พ.ค.": "05", "มิ.ย.": "06",
               "ก.ค.": "07", "ส.ค.": "08", "ก.ย.": "09", "ต.ค.": "10", "พ.ย.": "11", "ธ.ค.": "12"}
     try:
+        # ตัดตัวอักษรขยะหลังปีออก (เช่น '2569 มิ' -> '2569')
+        thai_date_str = re.sub(r'(\d{4}).*', r'\1', thai_date_str)
         parts = thai_date_str.split()
-        if len(parts) == 3:
+        if len(parts) >= 3:
             d, m, y = parts[0].zfill(2), months.get(parts[1], "01"), str(int(parts[2]) - 543)
             return f"{d}/{m}/{y}"
     except: return None
 
-def str_to_float(val):
-    if not val: return 0.0
-    try:
-        if isinstance(val, str):
-            val = val.replace(',', '')
-        return float(val)
-    except: return 0.0
-
-# ================= 2. Logic การอ่านไฟล์ BBL =================
-
 def parse_bbl_pdf(pdf_stream):
     all_rows = []
-    date_pattern = r'(\d{1,2}\s+(?:ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)\s+\d{4})'
+    # ปรับ Regex วันที่ให้ยืดหยุ่นขึ้น ไม่จำเป็นต้องจบด้วยปีทันที เผื่อมีตัวอักษรซ้ำติดมา
+    date_pattern = r'(\d{1,2}\s+[ก-ธ\.\s]{3,10}\s+\d{4})'
     time_pattern = r'(\d{2}:\d{2})'
     
     with pdfplumber.open(pdf_stream) as pdf:
         for page in pdf.pages:
-            lines = page.extract_text(x_tolerance=2, y_tolerance=2).split('\n')
-            for i, line in enumerate(lines):
-                line = line.strip()
+            # เพิ่ม y_tolerance เป็น 3 เพื่อช่วยรวมบรรทัดที่เยื้องเข้าด้วยกัน
+            lines = page.extract_text(x_tolerance=2, y_tolerance=3).split('\n')
+            for i, raw_line in enumerate(lines):
+                # *** จุดสำคัญ: ทำความสะอาดข้อความก่อนเช็ค Regex ***
+                line = clean_thai_text(raw_line.strip())
+                
                 date_matches = re.findall(date_pattern, line)
                 if not date_matches: continue
                 if any(k in line for k in ["สรุปยอด", "รายการเคลื่อนไหว", "เลขที่บัญชี", "ยอดยกมา"]): continue
 
-                time_val, extra_desc = "", ""
-                time_in_line = re.search(time_pattern, line)
-                if time_in_line: time_val = time_in_line.group(1)
-                
-                # อ่านบรรทัดถัดไปกรณีเวลาอยู่คนละบรรทัด
-                if i + 1 < len(lines):
-                    next_line = lines[i+1].strip()
-                    time_match_next = re.search(r'^(\d{2}:\d{2})', next_line)
-                    if time_match_next:
-                        time_val = time_match_next.group(1)
-                        extra_desc = next_line.replace(time_val, "").strip()
+                time_val = ""
+                time_match = re.search(time_pattern, line)
+                if time_match:
+                    time_val = time_match.group(1)
+                elif i + 1 < len(lines):
+                    # ถ้าหาเวลาไม่เจอในบรรทัด ลองดูบรรทัดถัดไป
+                    next_line = clean_thai_text(lines[i+1])
+                    time_match_next = re.search(time_pattern, next_line)
+                    if time_match_next: time_val = time_match_next.group(1)
 
                 amounts = re.findall(r'[\d,]+\.\d{2}', line)
                 if not amounts: continue
@@ -602,21 +602,21 @@ def parse_bbl_pdf(pdf_stream):
                 chan_match = re.search(r'\b(BR\d+|DR\d+|AUTO|TELE|M-BANKING|INTERNET)\b', line)
                 if chan_match: channel = chan_match.group(1)
 
-                # ล้าง Text เพื่อเอาแค่ Description
+                # ล้างเพื่อเอา Description
                 temp_desc = line
                 for d_raw in date_matches: temp_desc = temp_desc.replace(d_raw, "")
                 for amt in amounts: temp_desc = temp_desc.replace(amt, "")
                 if channel: temp_desc = temp_desc.replace(channel, "")
                 if cheque_no: temp_desc = temp_desc.replace(cheque_no, "")
 
-                full_desc = clean_thai_text(temp_desc + " " + extra_desc)
+                full_desc = clean_thai_text(temp_desc)
                 balance = str_to_float(amounts[-1])
                 
                 transaction_amount = 0.0
                 if len(amounts) >= 2:
                     val = str_to_float(amounts[-2])
-                    # แยกฝาก/ถอน
-                    if any(word in full_desc for word in ["ฝาก", "เข้า", "รับโอน", "คืน", "ดอกเบี้ย"]):
+                    # ตรวจสอบรายการฝาก
+                    if any(word in full_desc for word in ["ฝาก", "เข้า", "รับโอน", "คืน", "ดอกเบี้ย", "Clearing"]):
                         transaction_amount = val
                     else:
                         transaction_amount = -val
@@ -626,6 +626,12 @@ def parse_bbl_pdf(pdf_stream):
                 
                 all_rows.append([date_trans, time_val, date_eff, full_desc, cheque_no, transaction_amount, balance, channel])
     return all_rows
+
+def str_to_float(val):
+    if not val: return 0.0
+    try:
+        return float(str(val).replace(',', ''))
+    except: return 0.0
 
 # ================= 4. Streamlit UI & Logic =================
 st.title("📑 PDF Statement to Excel")
