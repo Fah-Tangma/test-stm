@@ -827,8 +827,8 @@ if convert_button:
                             df['วันที่ที่มีผล'] = pd.to_datetime(df['วันที่ที่มีผล'], format='%d/%m/%Y', errors='coerce')
                         elif bank_option == "ยูโอบี (UOB)":
                             rows = parse_uob_pdf(unlocked_io)
-                            all_dfs.append(pd.DataFrame(rows, columns=["Statement Date", "Value Date", "Transaction Date", 
-                       "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"]))
+                            all_dfs.append(pd.DataFrame(rows, columns=["Statement Date", "Value Date", "Transaction Date", "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"]))
+                            all_dfs.append(df)
 
             if all_dfs:
                 final_df = pd.concat(all_dfs, ignore_index=True)
