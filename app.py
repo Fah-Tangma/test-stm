@@ -448,7 +448,7 @@ if convert_button:
                             df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
                         elif bank_option == "ยูโอบี (UOB)":
-                            df = pd.DataFrame(parse_uob_pdf(unlocked_io), columns=["วันที่", "เวลา", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "Note"])
+                            df = pd.DataFrame(parse_uob_pdf(unlocked_io), columns=["Statement Date", "Value Date", "Transaction Date", "Transaction Time", "Description", "Deposit/Withdrawal", "Balance"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
                         all_dfs.append(df)
 
