@@ -371,9 +371,51 @@ def parse_bbl_pdf(pdf_stream):
     return all_rows
 
 # --- 5. UOB (ใหม่) ---
+def str_to_float(val_str):
+    if not val_str: return 0.0
+    try:
+        val = str(val_str).replace(',', '').strip()
+        return float(val)
+    except:
+        return 0.0
+
+def clean_description(text):
+    """ปรับแก้คำสะกดและเว้นวรรคให้ถูกต้อง"""
+    replacements = {
+        "MISCCREDIT": "MISC CREDIT",
+        "MISCDEBIT": "MISC DEBIT",
+        "PAYMENTEO": "PAYMENT EO",
+        "INVOICENO": "INVOICE NO",
+        "INTERESTCREDIT": "INTEREST CREDIT",
+        "WITHHOLDINGTAXDR": "WITHHOLDING TAX DR"
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+def is_garbage_line(line):
+    """กรองบรรทัดขยะ หัวตาราง และส่วนสรุปท้ายเอกสาร"""
+    garbage_keywords = [
+        "Account Statement", "Movement Details - From:",
+        "Statement", "Value Date", "Transaction", "Description",
+        "Deposit", "Withdrawal", "Balance", "Date/Time", "Date Date/Time",
+        "Total in Account Currency", "Note:",
+        "-Balances and details reflected are indicative", "TotalinAccountCurrency"
+    ]
+    line_upper = line.upper()
+    if any(kw.upper() in line_upper for kw in garbage_keywords):
+        return True
+    if re.match(r'^\d+\s?/\s?\d+$', line): 
+        return True
+    if re.match(r'^\d{2}/\d{2}/\d{4}$', line): 
+        return True
+    return False
+
 def parse_uob_pdf(pdf_stream):
     all_rows = []
     current_row = None
+    
     date_pattern = r'(\d{2}/\d{2}/\d{4})'
     row_start_pattern = fr'^({date_pattern})\s+({date_pattern})\s+({date_pattern})'
     time_pattern = r'(\d{2}:\d{2}:\d{2}\s?(?:AM|PM))'
@@ -382,28 +424,47 @@ def parse_uob_pdf(pdf_stream):
         for page in pdf_obj.pages:
             text = page.extract_text()
             if not text: continue
-            for line in text.split('\n'):
+            lines = text.split('\n')
+            
+            for line in lines:
                 line = line.strip()
-                if not line or is_garbage_line_uob(line): continue
+                if not line or is_garbage_line(line):
+                    continue
+
                 match_dates = re.match(row_start_pattern, line)
                 if match_dates:
                     if current_row: all_rows.append(current_row)
+                    
                     amounts = re.findall(r'[\d,]+\.\d{2}', line)
-                    current_row = {"st_date": match_dates.group(1), "val_date": match_dates.group(2), "tx_date": match_dates.group(3), "tx_time": "", "desc": "", "deposit": 0.0, "withdrawal": 0.0, "balance": 0.0}
+                    current_row = {
+                        "st_date": match_dates.group(1),
+                        "val_date": match_dates.group(2),
+                        "tx_date": match_dates.group(3),
+                        "tx_time": "",
+                        "desc": "",
+                        "deposit": 0.0, "withdrawal": 0.0, "balance": 0.0
+                    }
+                    
                     if len(amounts) >= 3:
-                        current_row["deposit"], current_row["withdrawal"], current_row["balance"] = str_to_float(amounts[-3]), str_to_float(amounts[-2]), str_to_float(amounts[-1])
-                        current_row["desc"] = line[33:].split(amounts[-3])[0].strip()
+                        current_row["deposit"] = str_to_float(amounts[-3])
+                        current_row["withdrawal"] = str_to_float(amounts[-2])
+                        current_row["balance"] = str_to_float(amounts[-1])
+                        
+                        desc_part = line[33:].strip()
+                        desc_part = desc_part.split(amounts[-3])[0].strip()
+                        current_row["desc"] = desc_part
+
                 elif current_row and re.search(time_pattern, line):
                     t_match = re.search(time_pattern, line)
                     current_row["tx_time"] = t_match.group(1)
-                    current_row["desc"] += " " + line.replace(t_match.group(1), "").strip()
-                elif current_row: current_row["desc"] += " " + line
+                    extra_desc = line.replace(current_row["tx_time"], "").strip()
+                    current_row["desc"] += " " + extra_desc
+
+                elif current_row:
+                    current_row["desc"] += " " + line
+
         if current_row: all_rows.append(current_row)
-    
-    final_rows = []
-    for r in all_rows:
-        final_rows.append([r["st_date"], "", clean_description_uob(r["desc"]), r["deposit"] - r["withdrawal"], r["balance"], r["tx_time"]])
-    return final_rows
+    return all_rows
 
 # ================= 5. Streamlit UI & Export =================
 st.title("📑 PDF Statement to Excel")
