@@ -462,7 +462,7 @@ if convert_button:
                     colors = {"กสิกรไทย (KBank)": '#00A950', "ไทยพาณิชย์ (SCB)": '#4E2E7F', "กรุงไทย (KTB)": '#00A1E0', "กรุงศรี (BAY)": '#FFCC00', "กรุงเทพ (BBL)": '#0A22A8', "ยูโอบี (UOB)": '#003399'}
                     h_color = colors.get(bank_option, '#333333')
                     header_fmt = workbook.add_format({'bold': True, 'bg_color': h_color, 'font_color': 'white' if bank_option != "กรุงศรี (BAY)" else 'black', 'align': 'center', 'border': 1})
-                    num_fmt = workbook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+                    num_fmt = workbook.add_format({'num_format': '_(* #,##0.00_);_(* (#,##0.00);_(* "-"??_);_(@_)', 'align': 'right'})
                     date_fmt = workbook.add_format({'num_format': 'm/d/yyyy', 'align': 'left'})
                     for col_num, value in enumerate(final_df.columns.values): worksheet.write(0, col_num, value, header_fmt)
                     worksheet.set_column('A:A', 15, date_fmt)
