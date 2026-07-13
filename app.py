@@ -634,34 +634,35 @@ if convert_button:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                 
-                elif bank_option == "กรุงเทพ (BBL)":
+                 elif bank_option == "กรุงเทพ (BBL)":
                     data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
                         # 1. สร้าง DataFrame
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         
-                        # 2. ลบแถวหัวตารางขยะที่ AI อาจแถมมา
+                        # 2. ลบแถวหัวตารางขยะ
                         df = df[df['เวลา'] != 'เวลา'] 
                 
-                        # 3. จัดการวันที่และเติมค่าว่าง (ffill)
+                        # 3. จัดการวันที่และเติมค่าว่าง
                         df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
                         
-                        # 4. *** จุดสำคัญ: แปลงเป็น datetime เพื่อใช้ในการเรียงลำดับ (Sorting) ***
-                        # สร้างคอลัมน์ชั่วคราวเพื่อใช้เรียงลำดับโดยเฉพาะ (รวมวันที่และเวลาเข้าด้วยกัน)
+                        # 4. เรียงลำดับจากเก่าไปใหม่ (จากล่างขึ้นบน)
                         df['sort_dt'] = pd.to_datetime(df['วันที่'] + ' ' + df['เวลา'], dayfirst=True, errors='coerce')
-                
-                        # 5. *** เรียงลำดับจากล่างขึ้นบน (เก่าไปใหม่) ***
-                        # ใช้ ascending=True เพื่อให้วันที่เก่าที่สุด (เช่น 02/06) อยู่บนสุด
                         df = df.sort_values(by='sort_dt', ascending=True).reset_index(drop=True)
-                
-                        # 6. ลบคอลัมน์ช่วยเรียง และแปลงวันที่ในตารางให้เป็น Format ที่สวยงาม
                         df = df.drop(columns=['sort_dt'])
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')
                 
-                        # 7. แปลงตัวเลขเงินให้เป็น Numeric เพื่อใช้ Format บัญชี
+                        # 5. *** แก้ไขจุดนี้: ลบคอมมาและแปลงเป็นตัวเลขให้ถูกต้อง ***
+                        # จัดการคอลัมน์เงินเข้า/ออก
+                        df['ถอนเงิน/ฝากเงิน'] = df['ถอนเงิน/ฝากเงิน'].astype(str).str.replace(',', '')
                         df['ถอนเงิน/ฝากเงิน'] = pd.to_numeric(df['ถอนเงิน/ฝากเงิน'], errors='coerce').fillna(0)
-                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)                                            
+                        
+                        # จัดการคอลัมน์ยอดคงเหลือ (ลบคอมมาออกก่อนแปลง)
+                        df['ยอดคงเหลือ'] = df['ยอดคงเหลือ'].astype(str).str.replace(',', '')
+                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)
+                
+                        # 6. แปลงวันที่เป็น Format สวยงามสำหรับแสดงผล
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                                     
                         
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
