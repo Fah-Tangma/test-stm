@@ -561,60 +561,42 @@ def parse_ktb_pdf(pdf_stream):
     return final_filtered_rows
 
 # ===== 4.BBL =====
-GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-genai.configure(api_key=GEMINI_API_KEY)
-
-def process_bbl_with_gemini(file_bytes, password=None):
-    """ฟังก์ชันจัดการไฟล์ BBL ด้วย Gemini AI เพื่อแก้ปัญหาตัวอักษรซ้อนและรายการแยกบรรทัด"""
-    
-    # 1. ปลดล็อค PDF (ถ้ามีรหัสผ่าน)
+def process_bbl_with_gemini(file_bytes, password):
+    """ฟังก์ชันจัดการไฟล์ BBL ด้วย Gemini AI"""
+    client = genai.Client(api_key=GEMINI_API_KEY)
     unlocked_bytes = file_bytes
     try:
         with pikepdf.open(io.BytesIO(file_bytes), password=password) as pdf:
             out_pdf = io.BytesIO()
             pdf.save(out_pdf)
             unlocked_bytes = out_pdf.getvalue()
-    except Exception:
-        pass # ถ้าไม่มีรหัสหรือเปิดได้เลยให้ผ่านไป
+    except:
+        pass
 
-    # 2. ตั้งค่า Model (ใช้ Flash เพราะเร็วและประหยัด)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    # 3. สร้าง Prompt ที่เจาะจงโครงสร้าง BBL Biz iBanking
+    model_name = "gemini-2.5-flash" 
     prompt = """
     คุณคือ OCR ผู้เชี่ยวชาญด้านสเตทเมนท์ธนาคารกรุงเทพ (BBL Biz iBanking) 
     โปรดอ่านข้อมูลจากไฟล์ PDF นี้อย่างละเอียด โดยมีกฎดังนี้:
 
     1. **จัดการตัวอักษรซ้อน**: หากพบตัวอักษรที่อ่านซ้อนกันเช่น 'มิ.มิย.' ให้แก้เป็น 'มิ.ย.' หรือ '2569 มิ' ให้แก้เป็น '2569'
-    2. **รวมบรรทัด**: ใน BBL หนึ่งรายการมักแยกเป็น 2 บรรทัด (เช่น วันที่และเวลาอยู่คนละบรรทัด หรือรายละเอียดถูกตัดแบ่ง) ให้รวมเป็นรายการเดียวกัน
-    3. **ตารางข้อมูล**: คืนค่าเป็น JSON Array ของ Array เท่านั้น โดยเรียงลำดับคอลัมน์ดังนี้:
-       [["วันที่ทำรายการ", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "จำนวนเงิน", "ยอดคงเหลือ", "ช่องทาง"]]
+    2. **รวมบรรทัด**: ใน BBL หนึ่งรายการมักแยกเป็น 2 บรรทัด (เช่น วันที่และเวลาอยู่คนละบรรทัด) ให้รวมเป็นรายการเดียวกัน
+    3. **คืนค่าเป็น JSON Array ของ Array เท่านั้น**: [["วันที่ทำรายการ", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "จำนวนเงิน", "ยอดคงเหลือ", "ช่องทาง"]]
     4. **การคำนวณจำนวนเงิน**: 
-       - ดูจากช่อง 'หักบัญชี' (Withdrawal) -> ให้ติดลบ เช่น -4500.00
-       - ดูจากช่อง 'เข้าบัญชี' (Deposit) -> ให้เป็นบวก เช่น 459000.00
-    5. **ทำความสะอาดรายละเอียด**: รวม 'คำอธิบาย' และข้อความบรรทัดถัดไปที่เกี่ยวข้องให้เป็นข้อความเดียวที่อ่านรู้เรื่อง
-    6. **ห้ามมี Header** และ **ห้ามมีคำอธิบายอื่น** ให้คืนค่าเฉพาะ JSON เท่านั้น
+       - หากอยู่ในช่อง 'หักบัญชี' ให้ติดลบ เช่น -4500.00
+       - หากอยู่ในช่อง 'เข้าบัญชี' ให้เป็นบวก เช่น 459000.00
+    5. **รายละเอียด**: รวมข้อความคำอธิบายทั้งหมดให้อยู่ในบรรทัดเดียวกัน
+    6. ห้ามมี Header และคืนค่าเฉพาะ JSON ห้ามมีคำอธิบายอื่น
     """
-
     try:
-        # ส่งไฟล์ให้ Gemini ประมวลผล
-        response = model.generate_content(
-            [
-                {"mime_type": "application/pdf", "data": unlocked_bytes},
-                prompt
-            ],
-            generation_config={"response_mime_type": "application/json"}
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[types.Part.from_bytes(data=unlocked_bytes, mime_type="application/pdf"), prompt],
+            config=types.GenerateContentConfig(response_mime_type='application/json'),
         )
-        
         res_text = response.text.strip()
-        
-        # ลบ Markdown ถ้ามี
         if res_text.startswith("```"):
-            res_text = re.sub(r'```json|```', '', res_text).strip()
-            
-        data = json.loads(res_text)
-        return data
-        
+            res_text = res_text.replace("```json", "").replace("```", "").strip()
+        return json.loads(res_text)
     except Exception as e:
         st.error(f"Gemini Error (BBL): {str(e)}")
         return None
@@ -648,6 +630,14 @@ if convert_button:
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "รหัส", "รายละเอียด", "ช่องทาง", "รหัสสาขา"])
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
                         all_dfs.append(df)
+                      
+                    elif bank_option == "กรุงเทพ (BBL)":
+                        data_rows = process_bbl_with_gemini(pdf_bytes, password)
+                    if data_rows:
+                        # กำหนดคอลัมน์ตาม Prompt ของ BBL
+                        df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
+                        all_dfs.append(df)  
                 
                 # --- กรณีธนาคารอื่นๆ (Rule-based) ---
                 else:
@@ -670,13 +660,7 @@ if convert_button:
                             rows = parse_ktb_pdf(unlocked_io)
                             df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "รายการ", "รายละเอียด", "ถอนเงิน/ฝากเงิน", "ภาษี", "ยอดคงเหลือ", "สาขา"])
                             df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                        
-                        elif bank_option == "กรุงเทพ (BBL)":
-                            rows = parse_bbl_pdf(unlocked_io)
-                            rows.reverse() 
-                            df = pd.DataFrame(rows, columns=["วันที่", "เวลา", "วันที่ที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
-                            df['วันที่'] = pd.to_datetime(df['วันที่'], format='%d/%m/%Y', errors='coerce')
-                        
+                                              
                         elif bank_option == "ยูโอบี (UOB)":
                             raw_uob = parse_uob_pdf(unlocked_io)
                             # สร้างข้อมูลตามหัวตารางที่กำหนด
