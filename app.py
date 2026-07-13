@@ -639,29 +639,31 @@ if convert_button:
                         # 1. สร้าง DataFrame
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         
-                        # 2. ลบแถวหัวตารางขยะ
+                        # 2. ลบแถวขยะที่อาจติดมา
                         df = df[df['เวลา'] != 'เวลา'] 
                 
-                        # 3. จัดการวันที่และเติมค่าว่าง
+                        # 3. จัดการคอมมาและแปลงเป็นตัวเลข (เพื่อให้คำนวณและแสดงผลไม่เพี้ยน)
+                        for col in ['ถอนเงิน/ฝากเงิน', 'ยอดคงเหลือ']:
+                            df[col] = df[col].astype(str).str.replace(',', '')
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+                
+                        # 4. จัดการวันที่ (เติมค่าว่าง และเตรียมสำหรับการเรียงลำดับ)
                         df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
                         
-                        # 4. เรียงลำดับจากเก่าไปใหม่ (จากล่างขึ้นบน)
-                        df['sort_dt'] = pd.to_datetime(df['วันที่'] + ' ' + df['เวลา'], dayfirst=True, errors='coerce')
-                        df = df.sort_values(by='sort_dt', ascending=True).reset_index(drop=True)
-                        df = df.drop(columns=['sort_dt'])
+                        # สร้างคอลัมน์ชั่วคราวเพื่อใช้เรียงลำดับ (วันที่ + เวลา)
+                        df['temp_sort'] = pd.to_datetime(df['วันที่'] + ' ' + df['เวลา'], dayfirst=True, errors='coerce')
                 
-                        # 5. *** แก้ไขจุดนี้: ลบคอมมาและแปลงเป็นตัวเลขให้ถูกต้อง ***
-                        # จัดการคอลัมน์เงินเข้า/ออก
-                        df['ถอนเงิน/ฝากเงิน'] = df['ถอนเงิน/ฝากเงิน'].astype(str).str.replace(',', '')
-                        df['ถอนเงิน/ฝากเงิน'] = pd.to_numeric(df['ถอนเงิน/ฝากเงิน'], errors='coerce').fillna(0)
+                        # 5. *** เรียงลำดับจากเก่าไปใหม่ (Oldest to Newest) ***
+                        # การเรียงแบบ ascending=True จะเอาวันที่ 02/06 ไว้บนสุด และ 26/06 ไว้ล่างสุด
+                        # ทำให้ยอดคงเหลือไล่เรียงกันไปตามลำดับเวลาจริง
+                        df = df.sort_values(by='temp_sort', ascending=True).reset_index(drop=True)
                         
-                        # จัดการคอลัมน์ยอดคงเหลือ (ลบคอมมาออกก่อนแปลง)
-                        df['ยอดคงเหลือ'] = df['ยอดคงเหลือ'].astype(str).str.replace(',', '')
-                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)
+                        # ลบคอลัมน์ชั่วคราวทิ้ง
+                        df = df.drop(columns=['temp_sort'])
                 
-                        # 6. แปลงวันที่เป็น Format สวยงามสำหรับแสดงผล
+                        # 6. แปลงวันที่เป็นรูปแบบ dd/mm/yyyy เพื่อความสวยงามใน Excel
                         df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                                    
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')                               
                         
                 # --- 2. กลุ่มธนาคารอื่นๆ (Rule-based) ห้ามยุ่งส่วนประมวลผลเดิม ---
                 else:
