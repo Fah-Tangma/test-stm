@@ -637,19 +637,41 @@ if convert_button:
                 elif bank_option == "กรุงเทพ (BBL)":
                     data_rows = process_bbl_with_gemini(pdf_bytes, password)
                     if data_rows:
+                        # 1. สร้าง DataFrame และเก็บลำดับแถวเดิมจาก PDF ไว้ (สำคัญมาก)
                         df = pd.DataFrame(data_rows, columns=["วันที่", "เวลา", "วันที่มีผล", "รายละเอียด", "เลขที่เช็ค", "ถอนเงิน/ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง"])
                         
-                        # 1. ลบแถวหัวตารางขยะ
+                        # เก็บตำแหน่งเดิมไว้ (PDF ให้ ใหม่ -> เก่า ดังนั้นแถวเลขมากคือรายการที่เกิดก่อน)
+                        df['pdf_order'] = df.index 
+                
+                        # 2. ลบแถวหัวตารางขยะ
                         df = df[df['เวลา'] != 'เวลา'] 
                 
-                        # 2. จัดการวันที่
-                        df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
-                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True, errors='coerce')
-                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True, errors='coerce')
+                        # 3. จัดการตัวเลข (ลบคอมมาและแปลงเป็น Numeric)
+                        for col in ['ถอนเงิน/ฝากเงิน', 'ยอดคงเหลือ']:
+                            df[col] = df[col].astype(str).str.replace(',', '')
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
                 
-                        # 3. *** จุดสำคัญ: แปลงคอลัมน์เงินให้เป็นตัวเลข (Numeric) ***
-                        df['ถอนเงิน/ฝากเงิน'] = pd.to_numeric(df['ถอนเงิน/ฝากเงิน'], errors='coerce').fillna(0)
-                        df['ยอดคงเหลือ'] = pd.to_numeric(df['ยอดคงเหลือ'], errors='coerce').fillna(0)
+                        # 4. จัดการวันที่ (เติมค่าว่าง ffill)
+                        df['วันที่'] = df['วันที่'].replace(r'^\s*$', pd.NA, regex=True).ffill()
+                        
+                        # สร้างคอลัมน์สำหรับเรียงลำดับตามวันและเวลา
+                        df['datetime_sort'] = pd.to_datetime(df['วันที่'] + ' ' + df['เวลา'], dayfirst=True, errors='coerce')
+                
+                        # 5. *** จุดสำคัญ: เรียงลำดับจากล่างขึ้นบน แม้เวลาจะเท่ากัน ***
+                        # เราจะเรียงตาม:
+                        #   - datetime_sort (จากน้อยไปมาก: วันเก่าไปวันใหม่)
+                        #   - pdf_order (จากมากไปน้อย: เพราะใน PDF รายการล่างสุดคือรายการแรกของเวลานั้นๆ)
+                        df = df.sort_values(
+                            by=['datetime_sort', 'pdf_order'], 
+                            ascending=[True, False]
+                        ).reset_index(drop=True)
+                
+                        # 6. ลบคอลัมน์ช่วยเรียงทิ้ง
+                        df = df.drop(columns=['pdf_order', 'datetime_sort'])
+                
+                        # 7. แปลงวันที่กลับเป็นรูปแบบ DD/MM/YYYY สำหรับ Excel
+                        df['วันที่'] = pd.to_datetime(df['วันที่'], dayfirst=True).dt.strftime('%d/%m/%Y')
+                        df['วันที่มีผล'] = pd.to_datetime(df['วันที่มีผล'], dayfirst=True).dt.strftime('%d/%m/%Y')
 
 
 # --- ในส่วนของ Export Excel (pd.ExcelWriter) ---
